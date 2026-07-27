@@ -1,9 +1,8 @@
 # GPUI 全平台原生化迁移
 
-> 状态：原生 Preview 实施中。共享核心与五平台 CI 构建已落地，桌面产物、Android
-> 模拟器启动和移动打包门禁持续运行；iOS Simulator 启动兼容正在收口，真机输入、无障碍
-> 与发布签名仍需人工验收。当前稳定实现仍以 [architecture.md](../architecture.md) 为准；
-> 只有通过本文对应阶段门禁的原生能力才能替代现有实现。
+> 状态：生产代码与发布入口已切换到 GPUI。共享核心、五平台 CI、桌面安装包、Android
+> 模拟器与 iOS Simulator 门禁已落地；真机输入、无障碍与商店签名仍需按发布手册人工验收。
+> Next.js/Tauri 只保留旧数据 V2 归档导出兼容性，不再生成生产 App。
 
 ## 1. 决策
 
@@ -14,7 +13,7 @@ ideall 将采用同一套 Rust 领域核心覆盖五个平台：
 - Node、FileSystem、Engine、Workspace、同步、Agent、归档和本地数据库跨平台共享；
 - 桌面和移动分别组合符合输入方式的 Display，不强行共享一套壳布局；
 - 新闻、社区和浏览器仍是隔离的外部 Web 内容，只允许出现在受限 WebView Engine 中；
-- Tauri 在迁移期继续作为稳定版和数据导出入口，完成五平台验收后删除。
+- 旧 Tauri 壳只作为只读迁移兼容入口；GPUI 是唯一生产 App 与发布目标。
 
 本迁移借鉴 OxideTerm 的“UI 与领域服务同进程”方向，但不复制其 GPL-3.0 代码或
 vendored GPUI fork。ideall 继续使用 Apache-2.0 许可；仓库内 gpui-mobile 快照选择其
@@ -36,7 +35,7 @@ Apache-2.0 许可，并保留未修改的上游 Apache/GPL/AGPL 许可证与 rev
 
 ## 3. 目标工作区
 
-迁移期原生代码位于独立的 `native/` Cargo workspace，不改变现有 `src/` 与 `src-tauri/` 的稳定构建：
+生产代码位于独立的 `native/` Cargo workspace；`src/` 与 `src-tauri/` 不参与生产构建：
 
 ```text
 native/
@@ -68,6 +67,8 @@ protocol → domain → application → adapters → UI → platform app
 ```
 
 `protocol` 与 `domain` 禁止依赖 GPUI、SQLite、HTTP、系统 API 或具体 UI。
+`ideall-presentation` 只保存无框架类型的导航、文案、语义色和异步请求协调状态；桌面和移动
+Render 模块分别组合各自 GPUI revision，避免复制产品语义。
 
 ## 4. GPUI 依赖策略
 
@@ -175,7 +176,7 @@ VoiceOver/TalkBack 语义；更完整的 GPUI 无障碍树与通用原生 View �
 
 - 桌面安装包、AAB、iOS archive、系统签名、更新签名与真实迁移验收完成。
 - 连续两个 Preview 版本没有数据损坏或 schema 回滚。
-- Stable 功能对等后停止 Tauri 发布，经过回滚窗口后删除旧实现。
+- 已停止 Tauri 发布；回滚窗口内只保留 V2 归档导出兼容层。
 
 ### 当前证据（2026-07-23）
 
@@ -186,11 +187,12 @@ VoiceOver/TalkBack 语义；更完整的 GPUI 无障碍树与通用原生 View �
 | Windows/macOS | CI 已配置目标 check、release build、包内结构校验并上传 zip/MSI/NSIS 与 `.app` zip/DMG Preview；受保护手动 workflow 已接二进制和安装器 Authenticode、Developer ID、DMG 公证 | 实际运行 Preview/签名 workflow；真实宿主安装/卸载、启动、WebView、IME 与无障碍人工验收 |
 | Android | gpui-mobile 真实 UI 在 host 编译；CI 已配置双 ABI APK/AAB 校验，并在 x86_64 模拟器真实创建笔记、经 `EditText` 代理输入标题/正文、滚动、旋转、Home/恢复、截图和 PID 连续性检查；SAF 选择器把 content URI 有界复制到私有缓存；Keystore 与 Android WebView 已接线；隐藏 `EditText` 代理已同步组合态、选区、提交文本和基础 TalkBack 语义；受保护手动 workflow 支持 keystore 签名 AAB | 新交互 CI/签名 workflow 实际结果、真机中文 IME/候选窗/选择句柄、旋转、后台恢复与 TalkBack 人工验收 |
 | iOS | CI 已配置 arm64 simulator release `.app` 构建和 XCTest 交互门禁，覆盖新建笔记、`UITextView` 标题/正文输入、滚动、横竖屏、后台恢复、重启和截图；Keychain、WKWebView、主线程 DocumentPicker 与 security-scoped 有界复制已接线；隐藏 `UITextView` 代理已同步组合态、选区、提交文本和基础 VoiceOver 语义；受保护手动 workflow 支持发行证书/描述文件和签名 IPA 导出 | 新交互 CI/签名 workflow 实际结果、真机中文 IME/候选窗/选择句柄、旋转、后台恢复与 VoiceOver 人工验收 |
-| 本地纵切 | 五分区、树、桌面标签、移动恢复、Note/Bookmark/File/Feed、全文搜索、回收站、导入、系统打开可用；Plate 标题/段落/引用/列表/任务/代码/分隔线可通过可逆 Markdown 投影编辑，未改 marks 复用原 JSON，未知块以指纹占位无损保护；移动端提供当前块格式工具栏、可筛选的 slash 块命令菜单和显式上移/下移块重排，并拒绝改写受保护块或已有代码围栏；移动正文支持多行滚动、按点击位置设置光标和原生组合输入桥；输入模型已测试 CJK、换行过滤、光标中部插入、Home/End/前后删除、完整 emoji grapheme 删除，以及不重复软键盘事件的外接键盘 Backspace/Delete/Enter 兜底；桌面和移动草稿通过 700ms 防抖异步保存，窗口退到后台时立即调度写入，Agent 活动查询不再阻塞渲染热路径，初始化失败显示恢复页 | 移动端以显式重排替代 Web Plate 的精确拖拽手势；原生候选窗、系统选择句柄和辅助功能仍须真机验证/补强 |
+| 本地纵切 | 五分区、树、桌面标签、移动恢复、Note/Bookmark/File/Feed、全文搜索、回收站、导入、系统打开可用；导航查询只读取 SQLite 投影列，不再反序列化完整正文；桌面与移动搜索使用 180ms 防抖、后台连接和过期结果拒绝；桌面提供全局搜索、新建、保存、关闭与标签循环快捷键；Plate 标题/段落/引用/列表/任务/代码/分隔线可通过可逆 Markdown 投影编辑，未改 marks 复用原 JSON，未知块以指纹占位无损保护；移动端提供当前块格式工具栏、可筛选的 slash 块命令菜单和显式上移/下移块重排，并拒绝改写受保护块或已有代码围栏；移动正文支持多行滚动、按点击位置设置光标和原生组合输入桥；输入模型已测试 CJK、换行过滤、光标中部插入、Home/End/前后删除、完整 emoji grapheme 删除，以及不重复软键盘事件的外接键盘 Backspace/Delete/Enter 兜底；桌面和移动草稿通过 700ms 防抖异步保存，窗口退到后台时立即调度写入，Agent 活动查询不再阻塞渲染热路径，初始化失败显示恢复页 | 移动端以显式重排替代 Web Plate 的精确拖拽手势；原生候选窗、系统选择句柄和辅助功能仍须真机验证/补强 |
 | 联网、更新与 Agent | 三分域加密同步、HTTP CAS、系统安全存储、本地 MCP、实时 Grant/脱敏审计、OpenAI-compatible BYOK 工具循环与持久线程可用；桌面 ACP v1 使用官方 Rust SDK、直接 argv 启动、默认拒绝权限请求，CLI 已与官方 TS SDK echo Agent 完成真实 stdio 握手；移动端明确只提供 BYOK；桌面设置页已接 minisign 清单验签、SemVer 防回滚、精确大小/SHA-256 下载和显式系统安装；受保护 release workflow 已接五平台聚合、清单签名/独立 Rust 验签，以及不回显凭据/模型正文的 staging model probe 与三分域 sync probe | 使用真实发行密钥和 staging 凭据实际运行 workflow；外部 ACP 逐请求交互审批与 ideall 作为入站 ACP Agent 的发布需求评审 |
 | Engine | 统一平台 capability 清单覆盖 info/community/browser/audio/code/git/shell/database/extension；移动资讯/社区使用隔离 WebView，Linux 使用系统浏览器；桌面 audio/database 只读副本交给系统应用，移动仅元数据；Git/Shell 因缺少目录授权/PTY/进程审计而不注册 renderer | 专业 Git/Shell/audio/database 原生交互属于后续增强，不再是 P5 可用性门禁；引入时仍须单独安全评审 |
 
-“CI 已配置”不等于对应平台已经通过。上述尚未满足项关闭之前，P6 不得标记完成，也不得删除 Tauri 稳定版。
+“CI 已配置”不等于真实设备已经通过。上述人工项未关闭前不得宣称完成商店级五平台验收；
+但生产构建不得回退到 Tauri，旧兼容层也不得写入 GPUI 数据目录。
 
 ## 9. 验证命令
 

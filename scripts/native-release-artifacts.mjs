@@ -151,11 +151,8 @@ export function finalizeNativeRelease({
   if (updateManifest.version !== version || updateManifest.channel !== channel) {
     throw new Error("更新清单版本或频道不匹配")
   }
-  const config = JSON.parse(readFileSync(path.join(root, "src-tauri", "tauri.conf.json"), "utf8"))
-  const keyId = assertSignatureMatchesPublicKey(
-    readFileSync(signaturePath, "utf8"),
-    config.plugins?.updater?.pubkey,
-  )
+  const publicKey = readFileSync(path.join(root, "native", "updater-public-key.txt"), "utf8").trim()
+  const keyId = assertSignatureMatchesPublicKey(readFileSync(signaturePath, "utf8"), publicKey)
 
   for (const name of ["SHA256SUMS", "native-release-manifest.json"]) {
     rmSync(path.join(outputDir, name), { force: true })

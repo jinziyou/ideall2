@@ -31,6 +31,7 @@ const ANDROID_ACTIVITY = new URL(
 const MOBILE_BUILD_SCRIPT = new URL("../native/apps/ideall-mobile/build-mobile.sh", import.meta.url)
 const MOBILE_MANIFEST = new URL("../native/apps/ideall-mobile/Cargo.toml", import.meta.url)
 const MOBILE_LIB = new URL("../native/apps/ideall-mobile/src/lib.rs", import.meta.url)
+const MOBILE_VIEW = new URL("../native/apps/ideall-mobile/src/mobile/view.rs", import.meta.url)
 const VENDORED_GPUI_README = new URL("../native/vendor/gpui-mobile/README.md", import.meta.url)
 const VENDORED_GPUI_SOURCE = new URL("../native/vendor/gpui-mobile/upstream.env", import.meta.url)
 const VENDORED_GPUI_MANIFEST = new URL("../native/vendor/gpui-mobile/Cargo.toml", import.meta.url)
@@ -100,6 +101,7 @@ test("iOS XcodeGen 工程为模拟器和真机选择对应的 Rust 静态库", (
 test("iOS 宿主在 UIKit 激活后启动 GPUI 并串行化状态通知", () => {
   const main = readFileSync(IOS_MAIN, "utf8")
   const mobileLib = readFileSync(MOBILE_LIB, "utf8")
+  const mobileView = readFileSync(MOBILE_VIEW, "utf8")
 
   const didFinish = main.slice(
     main.indexOf("didFinishLaunchingWithOptions:"),
@@ -141,7 +143,7 @@ test("iOS 宿主在 UIKit 激活后启动 GPUI 并串行化状态通知", () => 
   assert.match(mobileLib, /std::env::var\("IDEALL_UI_TESTING"\)/)
   assert.match(mobileLib, /IOS_UI_TEST_ACTION\.store\(action/)
   assert.match(mobileLib, /fn drain_ui_test_action\(/)
-  assert.match(mobileLib, /self\.drain_ui_test_action\(cx\)/)
+  assert.match(mobileView, /self\.drain_ui_test_action\(cx\)/)
 })
 
 test("gpui-mobile 快照固定来源并在 Rust 边界串行化 iOS 帧泵", () => {

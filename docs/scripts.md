@@ -135,9 +135,9 @@ pnpm version:check
 pnpm app:build
 ```
 
-`pnpm bump` 会先完整校验四个版本文件和替换计划，再同步 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 与 `Cargo.lock`；结构漂移或当前版本不一致时不会开始写入。`pnpm version:check` 是对应的只读门禁。`pnpm app:build` 只构建当前宿主平台；App 签名、自动更新和跨平台 CI 矩阵见 [app.md](app.md)。
+`pnpm bump` 会先完整校验版本文件和替换计划，再同步 `package.json`、`native/Cargo.toml`、`native/Cargo.lock`、桌面打包脚本与移动宿主版本；结构漂移或当前版本不一致时不会开始写入。`pnpm version:check` 是对应的只读门禁。`pnpm app:build` 构建当前宿主平台的 GPUI 桌面应用；签名、自动更新和跨平台 CI 矩阵见 [native/RELEASE.md](../native/RELEASE.md)。
 
-`release-preflight.mjs`、`release-artifacts.mjs` 与 `release-publish.mjs` 是 `app-build` 的内部 artifact-first 发布链：依次验证构建配置和签名密钥、暂存/聚合四平台资产、通过 staging draft 发布并可回滚切换 `app-edge`。它们依赖 GitHub Actions 注入的环境变量，不作为日常手动发版入口；纯函数与失败回滚由 `pnpm test:scripts` 覆盖。
+当前生产发布链位于 `.github/workflows/native-release.yml`、`native/scripts/` 和 `scripts/native-release-artifacts.mjs`。`release-preflight.mjs`、`release-artifacts.mjs` 与 `release-publish.mjs` 只服务于已冻结的 Tauri 兼容发布夹具，不再是生产入口；其纯函数仍由 `pnpm test:scripts` 覆盖，便于迁移期间验证旧产物。
 
 ## 新增脚本约定
 

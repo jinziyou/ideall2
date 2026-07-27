@@ -36,12 +36,9 @@ function fixture(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), "ideall-extension-registry-"))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const keys = keyFixture()
-  mkdirSync(path.join(root, "src-tauri"), { recursive: true })
+  mkdirSync(path.join(root, "native"), { recursive: true })
   mkdirSync(path.join(root, "registry", "packages"), { recursive: true })
-  writeFileSync(
-    path.join(root, "src-tauri", "tauri.conf.json"),
-    JSON.stringify({ plugins: { updater: { pubkey: keys.publicKey } } }),
-  )
+  writeFileSync(path.join(root, "native", "updater-public-key.txt"), keys.publicKey)
   writeFileSync(
     path.join(root, "registry", "extensions.json"),
     JSON.stringify({ schemaVersion: 1, registry: "ideall.official", entries: [] }),

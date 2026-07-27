@@ -1,5 +1,10 @@
 # ideall 开发约定
 
+> **原生切换说明（2026-07-27）**：生产开发入口已经迁到 `native/` Rust + GPUI
+> workspace，根命令见 [README](../README.md) 与
+> [`native/README.md`](../native/README.md)。本文的 `src/`、Next.js 与 Tauri 章节只约束
+> V2 归档导出兼容层，不再描述生产 App。
+
 ## Repository
 
 ideall 是**独立项目 / 独立仓库**（`git@github.com:jinziyou/ideall.git`）的 **Next.js 客户端应用**，本仓库为源码权威仓库。

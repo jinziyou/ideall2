@@ -4,7 +4,8 @@
 
 本策略仅覆盖 **ideall 客户端**（本仓库）。
 
-- ✅ ideall 前端、本地数据层、跨端同步加密（`src/lib/sync-crypto.ts`）、插件、Tauri App 壳
+- ✅ GPUI 桌面/移动 App、SQLite 本地数据层、跨端同步加密、Agent/ACP 与平台安全存储
+- ✅ 旧 Next.js/Tauri V2 归档导出兼容层（不进入生产发布）
 - ❌ **官方信息服务后端**（采集 / NLP / 知识图谱 / 鉴权 API）不在本仓库范围内；相关问题请通过官方服务渠道反馈
 
 ## 报告漏洞

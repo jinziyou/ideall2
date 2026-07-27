@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   quality:
-    name: quality
+    name: TypeScript migration compatibility
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -34,19 +34,5 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  build:
-    name: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-js
-      - uses: ./.github/actions/setup-next-cache
-      - name: Build
-        run: pnpm app:export
-
-# 另两道门拆在独立工作流 (带 paths 过滤, 省 CI 分钟数):
-#   rust.yml  — clippy 零警告 + cargo test (仅 src-tauri/** 改动时跑)
-#   smoke.yml — 真浏览器冒烟, 测静态导出生产形态 (仅应用面改动时跑)
+# 生产 App 的编译、打包和五平台冒烟统一由 rust.yml / native-release.yml 承担。
+# smoke.yml 只验证迁移期 Web 数据导出与 wire 兼容，不产生发布产物。

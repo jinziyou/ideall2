@@ -1,4 +1,4 @@
-71271ca11e59c5077a6a003246ee7f2ff27c1cdbdedbeef3f3dbedb332675408  native/vendor/gpui-mobile/Cargo.toml
+07830a20d91c0bdbe2a3e85e95fde41172c650cdb65409fb149485729a6983ab  native/vendor/gpui-mobile/Cargo.toml
 00ec99933ba002ee112800048526704ee3c040114a36b9f0f7c147fc579ad1c0  native/vendor/gpui-mobile/src/android/dispatcher.rs
 c563b7798e87a1ea9f975325e938c4a4957b93405d2a2d5af6ca9c72622b355c  native/vendor/gpui-mobile/src/android/display.rs
 b241276348c1e7bfad2d0f83e0c0db0cff2b534ea3d7ebea1a99115ad085704d  native/vendor/gpui-mobile/src/android/jni.rs

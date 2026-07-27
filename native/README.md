@@ -1,6 +1,7 @@
 # ideall native
 
-这里是 ideall 的 Rust + GPUI 原生实现。迁移完成前，仓库根目录的 Next.js/Tauri 应用仍是稳定版；两套应用使用独立数据目录，不能直接共享数据库。
+这里是 ideall 的 Rust + GPUI 生产实现。仓库根目录的 Next.js/Tauri 代码只保留为旧数据
+V2 归档导出兼容层，不再进入 App 构建或发布；两套实现使用独立数据目录，不能直接共享数据库。
 
 ## 当前入口
 
@@ -61,7 +62,7 @@ archive、签名/公证 DMG 与 Authenticode MSI/NSIS 安装器；
 所需 secret、人工 IME/无障碍矩阵与真实服务步骤见 [`RELEASE.md`](RELEASE.md)。
 
 桌面设置页通过固定 `native-preview` GitHub Release 检查更新。更新清单自身必须通过旧版
-Tauri updater 共用的官方 minisign 根验证，目标版本必须高于当前 SemVer；用户显式下载后，
+独立的官方 minisign 根验证，目标版本必须高于当前 SemVer；用户显式下载后，
 客户端还会强制核对清单声明的字节数与 SHA-256，校验成功才交给系统安装器。可用
 `IDEALL_NATIVE_UPDATE_URL` 与 `IDEALL_NATIVE_UPDATE_CHANNEL=preview|stable` 指向受控测试
 频道；更换 URL 不能绕过签名验证。受保护 release 构建会把所选频道编译为默认值，因此

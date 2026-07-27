@@ -13,18 +13,6 @@ const VERSION_FILES = [
     pattern: /("version"\s*:\s*")([^"]+)(")/,
   },
   {
-    path: "src-tauri/tauri.conf.json",
-    pattern: /("version"\s*:\s*")([^"]+)(")/,
-  },
-  {
-    path: "src-tauri/Cargo.toml",
-    pattern: /(^version\s*=\s*")([^"]+)(")/m,
-  },
-  {
-    path: "src-tauri/Cargo.lock",
-    pattern: /(name = "ideall"\r?\nversion = ")([^"]+)(")/,
-  },
-  {
     path: "native/Cargo.toml",
     pattern: /(\[workspace\.package\][\s\S]*?^version\s*=\s*")([^"]+)(")/m,
   },
@@ -85,7 +73,7 @@ export function loadProjectVersionState(root = PROJECT_ROOT) {
   })
 }
 
-/** 校验全部旧版与原生发布入口版本完全一致；传 expected 时同时校验发版 tag 的目标版本。 */
+/** 校验全部原生发布入口版本完全一致；传 expected 时同时校验发版目标版本。 */
 export function assertProjectVersions(entries, expected) {
   if (!entries.length) throw new Error("没有配置项目版本文件")
 

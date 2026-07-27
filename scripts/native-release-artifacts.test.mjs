@@ -100,12 +100,9 @@ test("finalize 绑定 minisign key id 并覆盖所有校验和", (t) => {
     pubDate: "2026-07-22T00:00:00.000Z",
   })
   writeFileSync(path.join(value.outputDir, "native-stable.json.sig"), keys.signature)
-  const configDir = path.join(value.root, "src-tauri")
+  const configDir = path.join(value.root, "native")
   mkdirSync(configDir, { recursive: true })
-  writeFileSync(
-    path.join(configDir, "tauri.conf.json"),
-    JSON.stringify({ plugins: { updater: { pubkey: keys.publicKey } } }),
-  )
+  writeFileSync(path.join(configDir, "updater-public-key.txt"), keys.publicKey)
   const manifest = finalizeNativeRelease({
     outputDir: value.outputDir,
     version: value.version,

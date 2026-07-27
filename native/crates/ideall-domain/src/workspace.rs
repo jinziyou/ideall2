@@ -83,6 +83,29 @@ impl WorkspaceState {
         }
         true
     }
+
+    pub fn activate_next(&mut self) -> bool {
+        self.activate_relative(1)
+    }
+
+    pub fn activate_previous(&mut self) -> bool {
+        self.activate_relative(-1)
+    }
+
+    fn activate_relative(&mut self, offset: isize) -> bool {
+        if self.tabs.is_empty() {
+            return false;
+        }
+        let current = self
+            .active_id
+            .as_deref()
+            .and_then(|active| self.tabs.iter().position(|tab| tab_key(tab) == active))
+            .unwrap_or(0);
+        let len = self.tabs.len() as isize;
+        let next = (current as isize + offset).rem_euclid(len) as usize;
+        self.active_id = self.tabs.get(next).map(tab_key);
+        true
+    }
 }
 
 #[cfg(test)]
@@ -119,5 +142,33 @@ mod tests {
         let second = workspace.open(tab("b", "preview", "B")).to_owned();
         assert!(workspace.close(&second));
         assert_eq!(workspace.active_id.as_deref(), Some(first.as_str()));
+    }
+
+    #[test]
+    fn relative_tab_activation_wraps_in_both_directions() {
+        let mut state = WorkspaceState::default();
+        let first = state
+            .open(TabDescriptor {
+                file: FileRef::new("local", "first"),
+                engine_id: "ideall.note".into(),
+                title: "First".into(),
+                root_id: None,
+                navigation_path: None,
+            })
+            .to_owned();
+        let second = state
+            .open(TabDescriptor {
+                file: FileRef::new("local", "second"),
+                engine_id: "ideall.note".into(),
+                title: "Second".into(),
+                root_id: None,
+                navigation_path: None,
+            })
+            .to_owned();
+
+        assert!(state.activate_next());
+        assert_eq!(state.active_id.as_deref(), Some(first.as_str()));
+        assert!(state.activate_previous());
+        assert_eq!(state.active_id.as_deref(), Some(second.as_str()));
     }
 }

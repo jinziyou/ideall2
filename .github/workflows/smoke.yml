@@ -1,8 +1,7 @@
-name: smoke
+name: legacy-web-compatibility
 
-# 冒烟门: 真浏览器驱动关键本地优先链路 (notes + files IDE + plugins + trash)。
-# 测的是**生产形态** —— 静态导出 (out/) 经 scripts/serve-out.mjs 提供,
-# 与 App 实际分发一致 (deep-link/.html 解析回归也在覆盖内), 不再依赖 dev 服。
+# 迁移兼容门：真浏览器驱动旧版数据导出链路，确保用户仍可生成 V2 归档迁移到 GPUI。
+# 该工作流不产生或发布 App；原生生产门禁见 rust.yml 与 native-release.yml。
 # PR 跑 files core 链路快速挡回归; push / 定时跑 files full 矩阵覆盖主流预览类型。
 # paths 过滤: 仅应用面改动才跑 (纯文档改动不烧浏览器分钟数)。
 on:
@@ -63,8 +62,8 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-js
       - uses: ./.github/actions/setup-next-cache
-      - name: Build static export
-        run: pnpm build
+      - name: Build legacy migration export
+        run: pnpm legacy:web:export
       - name: Upload static export
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:

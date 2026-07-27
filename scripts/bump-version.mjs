@@ -12,7 +12,7 @@ const HELP = `用法:
   node scripts/bump-version.mjs <x.y.z>
 
 说明:
-  同步旧 Tauri 与原生 Cargo、桌面打包、移动构建入口的项目版本。
+  同步原生 Cargo、桌面打包与移动构建入口的项目版本。
   写入前会完整校验全部文件及其当前版本，任一文件异常都不会产生修改。
 `
 

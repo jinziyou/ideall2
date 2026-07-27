@@ -406,8 +406,8 @@ jobs:
     environment: native-release
     timeout-minutes: 45
     env:
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      IDEALL_UPDATE_PRIVATE_KEY: ${{ secrets.IDEALL_UPDATE_PRIVATE_KEY }}
+      IDEALL_UPDATE_PRIVATE_KEY_PASSWORD: ${{ secrets.IDEALL_UPDATE_PRIVATE_KEY_PASSWORD }}
       RELEASE_CHANNEL: ${{ inputs.channel }}
       RELEASE_TAG: native-${{ inputs.channel }}
       RELEASE_VERSION: ${{ inputs.version }}
@@ -418,7 +418,6 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup-js
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.96.0
@@ -433,10 +432,12 @@ jobs:
         run: node scripts/native-release-artifacts.mjs prepare
       - name: Sign and cryptographically verify update manifest
         run: |
-          : "${TAURI_SIGNING_PRIVATE_KEY:?missing updater signing key}"
-          : "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:?missing updater signing key password}"
+          : "${IDEALL_UPDATE_PRIVATE_KEY:?missing updater signing key}"
+          : "${IDEALL_UPDATE_PRIVATE_KEY_PASSWORD:?missing updater signing key password}"
           manifest="native-release-ready/native-${RELEASE_CHANNEL}.json"
-          pnpm tauri signer sign "$manifest"
+          cargo run --locked --manifest-path native/Cargo.toml -p ideall-cli -- update-sign \
+            --manifest "$manifest" \
+            --signature "$manifest.sig"
           cargo run --locked --manifest-path native/Cargo.toml -p ideall-cli -- update-verify \
             --manifest "$manifest" \
             --signature "$manifest.sig" \

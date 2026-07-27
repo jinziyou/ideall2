@@ -20,7 +20,7 @@ import {
 } from "./release-preflight.mjs"
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..")
-const PNPM = process.platform === "win32" ? "pnpm.cmd" : "pnpm"
+const CARGO = process.platform === "win32" ? "cargo.exe" : "cargo"
 const REGISTRY_ID = "ideall.official"
 const RELEASE_TAG = "extension-registry"
 const PAGE_LIMIT = 64
@@ -213,19 +213,17 @@ function parsePackage(file, source, publisherPublicPacket, signatureVerifier) {
 }
 
 function officialFingerprint(root) {
-  const config = JSON.parse(readFileSync(path.join(root, "src-tauri", "tauri.conf.json"), "utf8"))
-  const publicDocument = Buffer.from(config.plugins?.updater?.pubkey ?? "", "base64")
-    .toString("utf8")
-    .trim()
+  const publicKey = readFileSync(path.join(root, "native", "updater-public-key.txt"), "utf8").trim()
+  const publicDocument = Buffer.from(publicKey, "base64").toString("utf8").trim()
   const packet = publicDocument
     .split(/\r?\n/u)
     .map((line) => line.trim())
     .find((line) => line && !line.includes("comment:"))
-  if (!packet) fail("Tauri updater 公钥无效")
+  if (!packet) fail("原生 updater 公钥无效")
   return {
     fingerprint: sha256Digest(Buffer.from(packet, "utf8")),
     packet,
-    publicKey: config.plugins.updater.pubkey,
+    publicKey,
   }
 }
 
@@ -342,17 +340,34 @@ export function buildRegistryPages({ entries, sequence, generatedAt, expiresAt }
 }
 
 function defaultSigner(payloadFile, { root }) {
-  execFileSync(PNPM, ["tauri", "signer", "sign", payloadFile], {
-    cwd: root,
-    env: process.env,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 30_000,
-  })
+  execFileSync(
+    CARGO,
+    [
+      "run",
+      "--locked",
+      "--manifest-path",
+      path.join(root, "native", "Cargo.toml"),
+      "-p",
+      "ideall-cli",
+      "--",
+      "update-sign",
+      "--manifest",
+      payloadFile,
+      "--signature",
+      `${payloadFile}.sig`,
+    ],
+    {
+      cwd: root,
+      env: process.env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 120_000,
+    },
+  )
   return readFileSync(`${payloadFile}.sig`, "utf8").trim()
 }
 
-function decodeTauriSignature(encoded, publicKey, publicPacket, content, signatureVerifier) {
+function decodeNativeSignature(encoded, publicKey, publicPacket, content, signatureVerifier) {
   assertSignatureMatchesPublicKey(encoded, publicKey)
   const text = Buffer.from(encoded, "base64").toString("utf8").trim()
   const lines = text.split(/\r?\n/u)
@@ -361,7 +376,7 @@ function decodeTauriSignature(encoded, publicKey, publicPacket, content, signatu
     !lines[0].startsWith("untrusted comment:") ||
     !lines[2].startsWith("trusted comment:")
   ) {
-    fail("Tauri signer 输出不是完整 Minisign signature 文本")
+    fail("原生 signer 输出不是完整 Minisign signature 文本")
   }
   signatureVerifier(Buffer.from(content, "utf8"), text, publicPacket)
   return text
@@ -429,7 +444,7 @@ export function prepareExtensionRegistry({
     writeFileSync(payloadFile, page.payload, { encoding: "utf8", mode: 0o600 })
     let signature
     try {
-      signature = decodeTauriSignature(
+      signature = decodeNativeSignature(
         signer(payloadFile, { root, page }),
         official.publicKey,
         official.packet,
@@ -577,8 +592,11 @@ function main() {
   }
   if (command === "verify") {
     const directory = path.resolve(process.env.REGISTRY_OUTPUT_DIR || "registry-ready")
-    const config = JSON.parse(readFileSync(path.join(ROOT, "src-tauri", "tauri.conf.json"), "utf8"))
-    const prepared = assertPreparedSignatureKey(directory, config.plugins.updater.pubkey)
+    const publicKey = readFileSync(
+      path.join(ROOT, "native", "updater-public-key.txt"),
+      "utf8",
+    ).trim()
+    const prepared = assertPreparedSignatureKey(directory, publicKey)
     console.log(`✓ Extension Registry 产物校验通过: sequence=${prepared.manifest.sequence}`)
     return
   }

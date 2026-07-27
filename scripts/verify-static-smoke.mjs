@@ -16,7 +16,7 @@ const HELP = `用法:
   node scripts/verify-static-smoke.mjs [--no-build] [smoke:notes|smoke:files|smoke:files:preview|smoke:plugins|smoke:trash ...]
 
 说明:
-  以生产形态运行浏览器冒烟：可选执行 pnpm app:export，检查 out/，启动静态预览服，再运行指定 smoke 脚本。
+  对迁移期 Web 兼容层运行浏览器冒烟：可选执行 pnpm legacy:web:export，检查 out/，启动静态预览服，再运行指定 smoke 脚本。
 
 环境变量:
   SMOKE_LEVEL=core|full  控制部分冒烟脚本的覆盖深度，默认 full。
@@ -84,7 +84,7 @@ async function main() {
 
   if (!noBuild) {
     console.log("[verify:static-smoke] building and validating the static export")
-    await runPnpm(["app:export"])
+    await runPnpm(["legacy:web:export"])
   } else {
     await runCommand(NODE, ["scripts/check-static-export.mjs"])
   }

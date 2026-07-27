@@ -13,7 +13,7 @@ use ideall_protocol::{
     BaseNode, BlobRef, BookmarkContent, FeedContent, FileKind, FileRef, FileSource, FileSourceKind,
     IdeallFile, Node, NodeKind, SubscriptionType, SyncNote, SyncSubscription, ThreadContent,
 };
-use ideall_storage::{ArchiveBlob, Database, StorageError};
+use ideall_storage::{ArchiveBlob, Database, NodeProjection, StorageError};
 use ideall_sync::{
     LocalStoreError, SyncBlockBudget, SyncLocalStore, SyncRunError, SyncRunResult, SyncScope,
     SyncTransport, TOMBSTONE_TTL_MS, gc_sync_notes, is_sane_sync_timestamp, merge_sync_notes,
@@ -122,6 +122,20 @@ impl From<&Node> for NodeSummary {
     }
 }
 
+impl From<&NodeProjection> for NodeSummary {
+    fn from(node: &NodeProjection) -> Self {
+        Self {
+            id: node.id.clone(),
+            parent_id: node.parent_id.clone(),
+            kind: node.kind,
+            title: node.title.clone(),
+            updated_at: node.updated_at,
+            deleted: node.deleted,
+            depth: 0,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlainNoteDocument {
     pub text: String,
@@ -221,7 +235,7 @@ impl LocalWorkspace {
     }
 
     pub fn list_home(&self) -> Result<Vec<NodeSummary>, ApplicationError> {
-        let nodes = self.database.list_nodes(false)?;
+        let nodes = self.database.list_node_projections(false)?;
         Ok(flatten_tree(&nodes))
     }
 
@@ -237,9 +251,9 @@ impl LocalWorkspace {
     pub fn list_trash(&self) -> Result<Vec<NodeSummary>, ApplicationError> {
         Ok(self
             .database
-            .list_nodes(true)?
+            .list_node_projections(true)?
             .iter()
-            .filter(|node| node.base().deleted_at.is_some())
+            .filter(|node| node.deleted)
             .map(NodeSummary::from)
             .collect())
     }
@@ -2023,22 +2037,21 @@ fn is_text_media_type(media_type: &str) -> bool {
         )
 }
 
-fn flatten_tree(nodes: &[Node]) -> Vec<NodeSummary> {
-    let mut children: HashMap<Option<&str>, Vec<&Node>> = HashMap::new();
+fn flatten_tree(nodes: &[NodeProjection]) -> Vec<NodeSummary> {
+    let mut children: HashMap<Option<&str>, Vec<&NodeProjection>> = HashMap::new();
     for node in nodes {
-        if node.base().id != HOME_ROOT_ID {
+        if node.id != HOME_ROOT_ID {
             children
-                .entry(node.base().parent_id.as_deref())
+                .entry(node.parent_id.as_deref())
                 .or_default()
                 .push(node);
         }
     }
     for group in children.values_mut() {
         group.sort_by(|left, right| {
-            left.base()
-                .sort_key
-                .cmp(&right.base().sort_key)
-                .then_with(|| left.base().id.cmp(&right.base().id))
+            left.sort_key
+                .cmp(&right.sort_key)
+                .then_with(|| left.id.cmp(&right.id))
         });
     }
     let mut result = Vec::with_capacity(nodes.len().saturating_sub(1));
@@ -2046,7 +2059,7 @@ fn flatten_tree(nodes: &[Node]) -> Vec<NodeSummary> {
     append_tree(Some(HOME_ROOT_ID), 0, &children, &mut visited, &mut result);
     append_tree(None, 0, &children, &mut visited, &mut result);
     for node in nodes {
-        if node.base().id != HOME_ROOT_ID && visited.insert(node.base().id.as_str()) {
+        if node.id != HOME_ROOT_ID && visited.insert(node.id.as_str()) {
             result.push(NodeSummary::from(node));
         }
     }
@@ -2056,7 +2069,7 @@ fn flatten_tree(nodes: &[Node]) -> Vec<NodeSummary> {
 fn append_tree<'a>(
     parent: Option<&'a str>,
     depth: usize,
-    children: &HashMap<Option<&'a str>, Vec<&'a Node>>,
+    children: &HashMap<Option<&'a str>, Vec<&'a NodeProjection>>,
     visited: &mut HashSet<&'a str>,
     result: &mut Vec<NodeSummary>,
 ) {
@@ -2064,19 +2077,13 @@ fn append_tree<'a>(
         return;
     };
     for node in group {
-        if !visited.insert(node.base().id.as_str()) {
+        if !visited.insert(node.id.as_str()) {
             continue;
         }
         let mut summary = NodeSummary::from(*node);
         summary.depth = depth;
         result.push(summary);
-        append_tree(
-            Some(node.base().id.as_str()),
-            depth + 1,
-            children,
-            visited,
-            result,
-        );
+        append_tree(Some(node.id.as_str()), depth + 1, children, visited, result);
     }
 }
 

@@ -25,8 +25,9 @@ MSI 和 NSIS setup。缺少任一密钥时任务必须失败，不能回退无�
   `IDEALL_APPLE_APP_PASSWORD`。
 - Windows：`IDEALL_WINDOWS_CERTIFICATE_BASE64`、
   `IDEALL_WINDOWS_CERTIFICATE_PASSWORD`。
-- 更新清单：`TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`；必须与
-  `src-tauri/tauri.conf.json` 里的 updater 公钥匹配。聚合任务会再用 Rust 客户端做完整验签，
+- 更新清单：`IDEALL_UPDATE_PRIVATE_KEY`、`IDEALL_UPDATE_PRIVATE_KEY_PASSWORD`；必须与
+  `native/updater-public-key.txt` 里的 updater 公钥匹配。聚合任务由 `ideall-cli`
+  在内存中完成 Minisign 签名，再用 Rust 客户端做完整验签，
   不是只比较 key id。
 - Staging 服务变量：`IDEALL_MODEL_BASE_URL`、`IDEALL_MODEL_NAME`、
   `IDEALL_SYNC_SERVER`；secrets：`IDEALL_MODEL_API_KEY`、`IDEALL_SYNC_CODE`、
@@ -81,5 +82,5 @@ VoiceOver 只要无法逐个发现、朗读并激活主要控件，候选版本�
 
 只有以下条件同时满足，才可批准 `native-stable` environment 并把原生版设为 Stable：签名 workflow 全绿；上述人工矩阵全绿；
 真实服务验收全绿；两个连续 Preview 版本未出现数据损坏或 schema 回滚。切换后至少保留
-两个 Stable 周期的 Tauri 可回滚发布物与 V2 导入路径。回滚窗口结束前，不删除旧
-Next/Tauri 代码、签名配置或下载渠道。
+两个 Stable 周期的旧版可回滚发布物与 V2 导入路径。回滚窗口结束前，不删除旧
+Next/Tauri 数据导出兼容代码或下载渠道；生产签名与发布配置只以 `native/` 为权威。

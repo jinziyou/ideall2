@@ -1,14 +1,17 @@
 # ideall 架构
 
-> 本文是 ideall 的架构权威说明，面向贡献者与集成方。产品定位与上手步骤见 [README.md](../README.md)；App（桌面/移动）打包细节见 [app.md](app.md)；开发约定见 [development.md](development.md)。
+> 本文是 ideall 的架构权威说明，面向贡献者与集成方。产品定位与上手步骤见
+> [README.md](../README.md)；App（桌面/移动）打包细节见
+> [`native/README.md`](../native/README.md)。本文后半仍保留部分旧 TypeScript 模块名，
+> 仅用于解释 V2 归档兼容映射；生产依赖边界以 `native/` Cargo workspace 为准。
 
 ## 1. 概览
 
-ideall 是**开源、本地优先的个人信息终端**：把分散的他人、信息、资源、工具，从你自己的视角聚合到一处。它**仅以 App 形态分发**——同一套 Next.js 代码经 Tauri 2.0 静态导出后打包为跨平台客户端。
+ideall 是**开源、本地优先的个人信息终端**：把分散的他人、信息、资源、工具，从你自己的视角聚合到一处。它**仅以 App 形态分发**——桌面使用 GPUI + gpui-component，iOS/Android 使用 GPUI + gpui-mobile，五个平台共享同一套 Rust 领域核心。
 
 三条核心理念贯穿全部设计：
 
-- **本地优先**：home（笔记/书签/资源/关注/对话）与 tool 的能力存于设备 IndexedDB，离线、无账号即可用；不会作为中央账户备份被自动整库上传。启用联网能力后的接收方与数据范围见[数据出站矩阵](../.github/SECURITY.md#数据出站矩阵)。
+- **本地优先**：home（笔记/书签/资源/关注/对话）与 tool 的能力存于设备 SQLite，离线、无账号即可用；不会作为中央账户备份被自动整库上传。启用联网能力后的接收方与数据范围见[数据出站矩阵](../.github/SECURITY.md#数据出站矩阵)。
 - **后端可换 / 可自建**：所有后端取数经 `ServerPort` 契约消费。wonita 服务只是默认与参考实现，ideall 不被任何单一后端绑死。
 - **本地核心不依赖后端**：home / tool 本地能力与 BYO-key agent 可离线使用；无账号端到端同步只传密文，但同步动作仍需要可用的 Sync 服务。info / community 是连接数据服务后的增强。
 
@@ -24,7 +27,9 @@ ideall 是**开源、本地优先的个人信息终端**：把分散的他人、
 
 ## 2. 领域模型
 
-ideall 的领域类型分两类：**本地拥有**（存 IndexedDB，本机即权威）与**后端供给**（经 `ServerPort` 取数，ideall 用自己的领域词汇定义，见 `src/protocol/server-port.ts`）。
+ideall 的领域类型分两类：**本地拥有**（存 SQLite，本机即权威）与**后端供给**（经
+服务适配器取数，ideall 用自己的领域词汇定义）。生产契约位于
+`native/crates/ideall-protocol`；`src/protocol` 只保留旧 wire 与 V2 归档兼容测试。
 
 ### 2.1 统一 Node 模型（一切皆文件）
 

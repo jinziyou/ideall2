@@ -2,15 +2,14 @@
 
 ## 项目结构与模块组织
 
-ideall 是基于 Next.js 与 Tauri 的本地优先个人信息终端。源码位于 `src/`：`app/` 是薄路由入口，`shell/` 是终端外壳与组合根，`workspace/` 负责 Display/标签页编排，`filesystem/` 管理挂载和 provider，并在 `src/filesystem/resource-sources/` 收口 Resource source/provider 兼容适配，`engines/` 负责文件到视图的匹配，`files/` 是本地 Node 数据层，`modules/` 放产品分区，`plugins/` 放 agent/sync/embed 等功能，`protocol/` 放纯契约，`ui/` 放基础组件，`shared/` 放共享 UI，`lib/` 放工具与适配器。Tauri 与 Rust 代码位于 `src-tauri/`。业务测试以 `*.test.ts` 形式就近放在 `src/`，维护脚本测试位于 `scripts/*.test.mjs`。文档入口是 `docs/README.md`，API schema 源文件是 `openapi/server.json`。
+ideall 是基于 Rust 与 GPUI 的本地优先个人信息终端。生产源码位于 `native/`：`apps/ideall-desktop` 是 GPUI 桌面壳，`apps/ideall-mobile` 是 iOS/Android 壳，`apps/ideall-cli` 提供检查和迁移工具；`crates/ideall-protocol` 保持纯契约，`ideall-domain` 负责 Engine/Workspace 规则，`ideall-application` 负责跨 UI 用例，`ideall-presentation` 收口无 GPUI 类型的导航、文案与设计 Token，storage/sync/agent/acp/secrets/updater 是适配层。`src/` 与 `src-tauri/` 只保留旧版 V2 归档导出兼容性，不进入生产发布。Rust 测试位于各 crate 的 `src/` 或 `tests/`，迁移兼容测试以 `*.test.ts` 就近放在 `src/`，维护脚本测试位于 `scripts/*.test.mjs`。文档入口是 `docs/README.md`，API schema 源文件是 `openapi/server.json`。
 
 ## 构建、测试与开发命令
 
-- `pnpm install`：使用 pnpm 9 与 Node 22+ 安装依赖。
-- `pnpm dev`：启动 Next 开发服务，地址为 `http://localhost:5020`。
-- `pnpm app:dev`：启动 Tauri 桌面壳，并加载开发服务。
-- `pnpm build` 或 `pnpm app:export`：生成用于 App 打包的静态导出。
-- `pnpm app:build`：构建 Tauri App；需要 Rust 与平台工具链。
+- `pnpm app:dev` 或 `pnpm dev`：启动 GPUI 桌面 App。
+- `pnpm app:build` 或 `pnpm build`：构建并打包当前桌面平台的 GPUI App。
+- `pnpm native:check`、`pnpm native:test`、`pnpm native:lint`：分别运行原生 workspace 检查、测试和 rustfmt/clippy 门禁。
+- `pnpm legacy:web:export`：仅为旧数据迁移生成 Next 静态兼容层；它不是生产 App。
 - `pnpm lint`、`pnpm lint:deps`、`pnpm lint:dead-code`、`pnpm lint:docs`、`pnpm typecheck`、`pnpm test`：分别运行架构边界、依赖使用、孤立文件、文档链接、TypeScript 与业务测试。
 - `pnpm test:coverage`：为选定的核心源码生成 c8 text/lcov 报告，并执行仓库基线覆盖率门槛。
 - `pnpm verify:checks`：运行不含生产构建的 CI 质量门禁，包含依赖与孤立文件 lint；`pnpm version:check` 校验四处项目版本一致。
@@ -19,7 +18,7 @@ ideall 是基于 Next.js 与 Tauri 的本地优先个人信息终端。源码位
 
 ## 代码风格与命名约定
 
-使用 TypeScript strict 模式与 `@/*`、`@protocol/*` 路径别名。默认优先 Server Components；只有交互组件才添加 `"use client"`。UI 复用 `src/ui` 原语，并遵循 `docs/design/ui-style.md`。ESLint 会强制架构边界：`protocol` 保持纯净，`app` 路由不可被反向 import，功能模块保持隔离，`src/lib/api` 的 wire DTO 只供 HTTP 适配器使用。用 `pnpm format` 格式化，用 `pnpm format:check` 检查格式。
+Rust 使用 edition 2024，依赖方向固定为 `protocol → domain → application → adapters → UI → platform app`；共享 crate 的公开 API 不得暴露 GPUI 类型。桌面与移动使用各自经验证的 GPUI revision，不直接共享 UI 类型。运行 `cargo fmt` 格式化，clippy 警告视为错误。旧兼容层继续使用 TypeScript strict、`@/*` 与 `@protocol/*` 路径别名，并保持现有 ESLint 架构边界。
 
 ## 测试指南
 

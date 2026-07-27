@@ -10,6 +10,7 @@ Apache-2.0 许可选项；发布包同时携带仓库根目录 `LICENSE` 与本�
 | Zed `gpui`（移动间接依赖） | `74798c68d5c63d31e2ccca5c8f5ec0a02c90679c` | Apache-2.0 |
 | `gpui-mobile` | `1d3ec2a1d14a63b74d1f4269340441d4eeada27a` | Apache-2.0（上游三选一许可中的 Apache 选项） |
 | `agent-client-protocol` Rust SDK | crates.io `1.3.0`（ACP wire v1） | Apache-2.0 |
+| `minisign` | crates.io `0.9.1` | MIT |
 | `minisign-verify` | crates.io `0.2.5` | MIT |
 | `semver` | crates.io `1.0.28` | Apache-2.0 |
 

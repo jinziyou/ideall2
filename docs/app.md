@@ -1,5 +1,10 @@
 # ideall：App（桌面 / 移动）
 
+> **历史兼容文档（2026-07-27）**：本文记录旧 Next.js/Tauri 壳，只用于导出 V2
+> 工作区归档和排查旧安装。生产 App、根开发命令与发布流水线已切换到 Rust + GPUI；
+> 当前操作请以 [`native/README.md`](../native/README.md) 和
+> [`native/RELEASE.md`](../native/RELEASE.md) 为准。
+
 ideall **仅以 App 形态分发**：一套 Next.js 代码库经 Tauri 打包为跨平台客户端。
 
 | 项 | 当前口径 |

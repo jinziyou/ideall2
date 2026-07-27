@@ -18,7 +18,8 @@ on:
       - "scripts/release-preflight.mjs"
       - "scripts/release-publish.mjs"
       - ".github/workflows/extension-registry.yml"
-      - "src-tauri/tauri.conf.json"
+      - "native/updater-public-key.txt"
+      - "native/apps/ideall-cli/**"
 
 permissions:
   contents: write
@@ -37,14 +38,19 @@ jobs:
         with:
           ref: main
           persist-credentials: false
-      - uses: ./.github/actions/setup-js
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.96.0
+      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: ./native -> target
       - id: source
         name: Resolve publication source and clock
         run: node -e "const fs=require('node:fs'),cp=require('node:child_process'); fs.appendFileSync(process.env.GITHUB_OUTPUT, 'sha=' + cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim() + '\nnow=' + Date.now() + '\n')"
       - name: Prepare signed Registry assets
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          IDEALL_UPDATE_PRIVATE_KEY: ${{ secrets.IDEALL_UPDATE_PRIVATE_KEY }}
+          IDEALL_UPDATE_PRIVATE_KEY_PASSWORD: ${{ secrets.IDEALL_UPDATE_PRIVATE_KEY_PASSWORD }}
           REGISTRY_GENERATED_AT: ${{ steps.source.outputs.now }}
           REGISTRY_SEQUENCE: ${{ inputs.sequence || steps.source.outputs.now }}
           REGISTRY_VALIDITY_DAYS: "14"

@@ -1,11 +1,11 @@
-# ideall：App（桌面 / 移动）
+# 旧版 Tauri App 兼容手册
 
 > **历史兼容文档（2026-07-27）**：本文记录旧 Next.js/Tauri 壳，只用于导出 V2
 > 工作区归档和排查旧安装。生产 App、根开发命令与发布流水线已切换到 Rust + GPUI；
 > 当前操作请以 [`native/README.md`](../native/README.md) 和
 > [`native/RELEASE.md`](../native/RELEASE.md) 为准。
 
-ideall **仅以 App 形态分发**：一套 Next.js 代码库经 Tauri 打包为跨平台客户端。
+下表和后续章节只描述停产前的 Tauri 口径，不代表当前构建、平台覆盖或发布状态。
 
 | 项 | 当前口径 |
 | --- | --- |
@@ -50,29 +50,25 @@ ideall/
 sudo apt-get update && sudo apt-get install -y \
   libwebkit2gtk-4.1-dev build-essential curl wget file \
   libxdo-dev libssl-dev libayatana-appindicator3-dev \
-  librsvg2-dev libgtk-3-dev pkgconf
+  librsvg2-dev libgtk-3-dev pkgconf \
+  desktop-file-utils gnome-keyring
 ```
 
 WSL 图形依赖 **WSLg**；dbus/GTK 包更新后窗口仍异常时，Windows 侧 `wsl --shutdown` 后重开。详见 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)。
+
+> **系统凭据库（Secret Service）**：桌面 Linux 依赖 `gnome-keyring`（或其它 Secret Service 实现）完成 0.2 data-epoch 清凭据与 API key 存取。WSL 若未安装/未启动 keyring，App 会回退到会话级 linux keyutils，避免 BootGate 卡在 `BOOT_REGISTRATION_FAILED`；跨重启持久化仍建议安装并启动 `gnome-keyring`。
 
 > **窗口空白（WSL2 无 GPU）**：WebKitGTK 的 DMABUF / 加速合成渲染在 WSL2 常初始化失败（`libEGL` / `MESA ZINK` / `dri2` 报错）导致窗口空白。`scripts/app-dev.mjs` 会在 Linux 启动前注入 WebKitGTK 软件渲染与 WSLg 相关环境变量；已手动 export 同名变量则以你的为准。
 
 ## 构建 / 运行命令
 
 ```bash
-# 开发
-pnpm dev            # SSR 开发服 http://localhost:5020（也是 Tauri 壳的加载源）
-pnpm app:dev        # 桌面开发壳：复用或启动上面的 dev 服
-
-# 构建
-pnpm build          # 仅执行 Next 静态导出 → out/
-pnpm app:export     # build → 关键静态入口检查 → bundle 预算（生产导出统一入口）
-pnpm app:build      # 为当前宿主平台打包（依赖 app:export + 平台工具链/图标）
-
-# 本地基础门禁
-pnpm verify:base
-pnpm verify:static-export
-pnpm verify:smoke:static  # 静态导出生产形态冒烟
+# 仅在维护旧兼容层时使用
+pnpm web:dev                 # 旧 Next.js 开发服
+pnpm legacy:web:export       # V2 归档导出兼容层
+pnpm legacy:tauri:dev        # 排查旧 Tauri 安装时使用
+pnpm legacy:tauri build      # 不属于生产发布
+pnpm verify:smoke:static     # 旧静态导出冒烟
 ```
 
 发布前还需在真实桌面进程与系统凭据库上执行 [Tauri App 数据安全验收](app-data-safety-acceptance.md)；设置页的“运行系统凭据库自检”会完成一次性随机值的写入、读回和清理。
@@ -81,15 +77,15 @@ pnpm verify:smoke:static  # 静态导出生产形态冒烟
 
 ### 指定备用端口启动（5020 被占用时）
 
-默认 `pnpm app:dev` 内部走 `next dev -p 5020`。WSL 下编辑器（Cursor / VS Code Remote）的自动端口转发可能钉死 5020，导致反复报 `EADDRINUSE: address already in use :::5020`。
+旧 `pnpm legacy:tauri:dev` 流程默认使用 5020。WSL 下编辑器自动端口转发可能占用该端口。
 
 换个端口启动即可绕开。用 Tauri 的 `--config` 内联覆盖 `devUrl`；`app:dev` 会据此选择 Next 端口，并把参数透传给 `tauri dev`：
 
 ```bash
-pnpm app:dev --config '{"build":{"devUrl":"http://localhost:5026"}}'
+pnpm legacy:tauri:dev --config '{"build":{"devUrl":"http://localhost:5026"}}'
 ```
 
-- `app:dev` 读取 `devUrl` 后，在 5026 复用已有 Next 开发服或自行启动一个。
+- 旧启动脚本读取 `devUrl` 后，在 5026 复用已有 Next 开发服或自行启动一个。
 - Tauri 壳使用同一个 `devUrl`，因此会加载 5026 上的开发服。
 - 端口可以按需调整；5026 仅为示例，可先用 `ss -ltn` 确认端口未被占用。
 
@@ -123,7 +119,8 @@ pnpm app:dev --config '{"build":{"devUrl":"http://localhost:5026"}}'
 
 CI 分三层：
 
-- `.github/workflows/ci.yml`：单一 quality job 运行 `verify:checks`，build job 通过共享 `setup-next-cache` action 复用 Next 缓存并运行 `app:export`，避免每项检查重复安装依赖，同时锁住静态入口和 bundle 预算。
+- 历史 `.github/workflows/ci.yml` quality/build 分层曾运行 `app:export`；当前等价兼容入口为
+  `legacy:web:export`，生产 CI 以原生 workflow 为准。
 - `.github/workflows/rust.yml`：`src-tauri/**` 改动时跑 rustfmt、cargo check、clippy 零警告和 cargo test。
 - `.github/workflows/smoke.yml`：应用面改动时跑静态导出生产形态的浏览器冒烟；本地等价入口是 `pnpm verify:smoke:static`。
 

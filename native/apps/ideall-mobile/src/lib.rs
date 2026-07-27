@@ -1300,6 +1300,9 @@ mod mobile {
                 Err(MobileBlockFormatError::CodeBlock) => {
                     self.status = "代码围栏内部保持原样；请在普通文本块上应用格式".into();
                 }
+                Err(MobileBlockFormatError::UnclosedCodeFence) => {
+                    self.status = "正文含未闭合代码围栏，请先修复".into();
+                }
             }
             gpui_mobile::TEXT_INPUT_DIRTY.store(true, std::sync::atomic::Ordering::Release);
             cx.notify();
@@ -1331,6 +1334,9 @@ mod mobile {
                 }
                 Err(MobileBlockFormatError::CodeBlock) => {
                     self.status = "代码围栏内部不执行斜杠命令".into();
+                }
+                Err(MobileBlockFormatError::UnclosedCodeFence) => {
+                    self.status = "正文含未闭合代码围栏，请先修复".into();
                 }
             }
             gpui_mobile::TEXT_INPUT_DIRTY.store(true, std::sync::atomic::Ordering::Release);

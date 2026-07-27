@@ -68,8 +68,10 @@ archive、签名/公证 DMG 与 Authenticode MSI/NSIS 安装器；
 频道；更换 URL 不能绕过签名验证。受保护 release 构建会把所选频道编译为默认值，因此
 Stable 二进制不会回看 Preview；运行期环境变量仅用于受控诊断。原生端不做静默自替换。
 
-- `ideall-desktop`：GPUI + gpui-component 桌面壳。
-- `ideall-mobile`：gpui-mobile iOS/Android 静态/动态库入口，并包含 Android Gradle 与 iOS XcodeGen 工程壳。gpui-mobile 使用 `vendor/gpui-mobile` 中可追溯的固定源码快照，来源、许可证、本地差异校验和与升级步骤见其 `README.md`。CI 还会联网比对固定上游 revision，拒绝未登记的源码漂移。编辑器变换收口在 `src/editor.rs`，系统文本输入桥收口在 `src/native_text.rs`。Android 需要 SDK、NDK、`cargo-ndk` 和 Gradle 8.9+；iOS 需要 Xcode 16 与 XcodeGen。真机签名通过 `IDEALL_DEVELOPMENT_TEAM` 传入。
+- `ideall-desktop`：GPUI + gpui-component 桌面壳；Editor、Explorer、Browser 与 Shell
+  的状态边界和挂载状态见
+  [`docs/design/desktop-components.md`](../docs/design/desktop-components.md)。
+- `ideall-mobile`：gpui-mobile iOS/Android 静态/动态库入口，并包含 Android Gradle 与 iOS XcodeGen 工程壳。gpui-mobile 使用 `vendor/gpui-mobile` 中可追溯的固定源码快照，来源、许可证、本地差异校验和与升级步骤见其 `README.md`。CI 还会联网比对固定上游 revision，拒绝未登记的源码漂移。块编辑变换与桌面共用 `ideall-application::note_edit`，移动硬件键盘和 Unicode 输入辅助保留在 `src/editor.rs`，系统文本输入桥收口在 `src/native_text.rs`。Android 需要 SDK、NDK、`cargo-ndk` 和 Gradle 8.9+；iOS 需要 Xcode 16 与 XcodeGen。真机签名通过 `IDEALL_DEVELOPMENT_TEAM` 传入。
 - `ideall-cli`：数据库 doctor、V2 归档预检/原子导入、外部 ACP v1，以及不回显凭据/正文的真实模型与同步 staging 探测。
 - `ideall-protocol`：与现有 TypeScript wire 对齐的纯契约。
 - `ideall-domain`：不依赖 UI/Storage 的 Engine 与 Workspace 逻辑。
@@ -83,10 +85,11 @@ Stable 二进制不会回看 Preview；运行期环境变量仅用于受控诊�
 - `ideall-updater`：严格解析并验证 minisign 更新清单，选择平台安装器并执行有预算的 SHA-256 下载。
 
 原生笔记编辑器使用可逆 Markdown 块投影：标题、段落、引用、列表、任务、代码块与
-分隔线可直接编辑；移动端提供作用于光标所在块的格式工具栏，以及输入 `/` 后按名称筛选
-的块命令菜单。工具栏还可整体上移/下移当前段落、多行引用、代码块或受保护块，作为移动端
-精确块拖拽的可操作替代。已有代码围栏和受保护块不会被工具栏或命令改写。未修改块保留
-原始 Plate JSON 与 marks。尚不认识的块显示
+分隔线可直接编辑。桌面端提供 Notion 式居中文档画布、块工具栏、行内格式、`/` 命令、
+列表层级、待办切换，以及块移动、复制和可撤销删除；移动端提供适配触屏和系统输入代理的
+块工具栏、`/` 命令和块移动。两端共用 application 层的纯编辑规则。已有代码围栏和受保护块
+不会被工具栏或命令改写。未修改块保留原始 Plate JSON 与 marks。桌面能力、快捷键和验收
+边界见 [`docs/design/desktop-editor.md`](../docs/design/desktop-editor.md)。尚不认识的块显示
 `⟦ideall:受保护块:…⟧` 指纹占位，保存时必须保留该行，application 层会把原始
 JSON 精确放回并维护与旧客户端兼容的稳定块 ID、`blockMeta` 与删除 tombstone。
 正文编辑使用 700ms 防抖草稿保存，并在窗口退到后台时立即调度持久化；数据库写入和
@@ -102,9 +105,10 @@ ACP 权限请求当前全部拒绝；外部进程本身仍拥有当前系统账�
 原生壳在“应用”中展示同一份按目标平台计算的 Engine capability 清单。页面、书签、
 关注、对话、文件树、Preview 和 Code 使用原生 renderer；资讯/社区仅进入隔离 WebView，
 Linux 因 GPUI 子窗口限制改由系统浏览器打开。桌面音频和 SQLite 文件只导出只读临时
-副本并交给系统应用，移动端仅展示安全元数据。Git 与 Shell 当前明确为不可用：在具备
-目录授权、跨平台 PTY、进程隔离和审计前，不注册 renderer，也不把任意路径或无约束
-shell 暴露给 UI/Agent。这些降级是可测试的产品能力，不以占位入口冒充专业实现。
+副本并交给系统应用，移动端仅展示安全元数据。Git 与 Shell Engine 当前明确为不可用。
+桌面源码已把 Shell 的显式 program/argv 执行核心收口为独立、未挂载组件，但在具备目录
+授权、跨平台 PTY、进程隔离和审计前仍不注册 renderer，也不向导航、快捷键或 Agent 暴露
+任意路径执行能力。这些降级是可测试的产品能力，不以占位入口冒充专业实现。
 
 原生 UI 依赖的许可证选择记录见 [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)。
 

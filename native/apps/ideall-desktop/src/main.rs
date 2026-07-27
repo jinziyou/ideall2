@@ -1,40 +1,48 @@
 mod actions;
+mod browser;
+mod editor;
+mod explorer;
+mod shell;
 mod view;
 
 use std::{path::PathBuf, time::Duration};
 
 use directories::ProjectDirs;
 use gpui::{
-    App, Application, Context, Entity, IntoElement, PathPromptOptions, PromptButton, PromptLevel,
-    Render, SharedString, Subscription, Task, TitlebarOptions, Window, WindowBounds, WindowOptions,
-    div, prelude::*, px, rgb, size,
+    App, Application, Context, Entity, IntoElement, MouseButton, PathPromptOptions, PromptButton,
+    PromptLevel, Render, SharedString, Subscription, Task, TitlebarOptions, Window, WindowBounds,
+    WindowOptions, div, prelude::*, px, rgb, size,
 };
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use gpui_component::webview::WebView;
 use gpui_component::{
-    Disableable as _, Root, Selectable as _, Sizable as _,
+    Disableable as _, PixelsExt as _, Root, Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputEvent, InputState},
+    menu::ContextMenuExt as _,
+    resizable::{ResizablePanelEvent, ResizableState, h_resizable, resizable_panel},
     scroll::ScrollableElement as _,
     text::TextView,
+    theme::{Theme, ThemeMode},
 };
 use ideall_acp::{AcpToolStatus, ExternalAcpConfig, command_exists, run_external_acp};
 use ideall_application::{
     AgentAuditRecord, AgentModelSettings, AgentToolRun, AgentTranscriptMessage, AuditStatus,
-    ExternalAcpSettings, HOME_ROOT_ID, LocalWorkspace, ModelRole, NodeSummary,
-    OpenAiCompatibleClient, SyncSettings,
+    ExternalAcpSettings, HOME_ROOT_ID, LocalWorkspace, ModelRole, NodeSummary, NoteBlockIndent,
+    NoteBlockMove, NoteBlockStyle, NoteInlineStyle, NoteSlashCommand, OpenAiCompatibleClient,
+    SyncSettings, note_slash_commands, note_slash_query,
 };
 use ideall_domain::{
-    EnginePlatform, EnginePreferences, EngineRuntimeKind, TabDescriptor, WorkspaceState,
-    builtin_engines, engine_runtime_capabilities, list_matching_engines, resolve_default_engine,
-    tab_key,
+    EnginePlatform, EnginePreferences, EngineRuntimeKind, ExplorerLayoutState, TabDescriptor,
+    WorkspaceState, builtin_engines, engine_runtime_capabilities, list_matching_engines,
+    resolve_default_engine, tab_key,
 };
 use ideall_presentation::{
     LatestRequest, NAVIGATION,
-    color::{
-        ACCENT, ACCENT_ON_RAIL, ACCENT_SOFT, BORDER, CANVAS, DANGER, DANGER_BORDER, INK, INK_FAINT,
-        INK_MUTED, MESSAGE_TOOL, RAIL, RAIL_ACTIVE, RAIL_INK, RAIL_MUTED, SURFACE, SURFACE_MUTED,
-        SURFACE_RAISED, WARNING_SOFT,
+    color::desktop::{
+        ACCENT, ACCENT_SOFT, BORDER, BORDER_STRONG, CANVAS, DANGER, DANGER_BORDER, EDITOR,
+        EDITOR_GUTTER, HOVER, INK, INK_FAINT, INK_MUTED, MESSAGE_TOOL, RAIL_ACTIVE, RAIL_INK,
+        RAIL_MUTED, SELECTION, SURFACE, SURFACE_MUTED, SURFACE_RAISED, WARNING_SOFT,
     },
     section_description, section_eyebrow,
 };
@@ -43,6 +51,14 @@ use ideall_secrets::{SecretKey, SecretStore as _, SystemSecretStore};
 use ideall_sync::{is_valid_sync_code, normalize_sync_code};
 use ideall_sync_http::HttpSyncTransport;
 use ideall_updater::{AvailableUpdate, UpdateStatus, updater_from_environment};
+
+use browser::BrowserWorkspace;
+use editor::{
+    EditorInputs, EditorMode, EditorWorkspace, LoadedDocument, code_language_for_node, engine_icon,
+    kind_color_for_engine, position_for_byte_offset,
+};
+use explorer::{DraggedNode, ExplorerState, kind_color, kind_icon};
+use shell::ShellWorkspace;
 
 const INFO_PORTAL_URL: &str = "https://www.wonita.link/info";
 const COMMUNITY_PORTAL_URL: &str = "https://www.wonita.link/community";
@@ -103,12 +119,10 @@ struct IdeallDesktop {
     database_path: PathBuf,
     service: LocalWorkspace,
     secret_store: SystemSecretStore,
-    engines: Vec<EngineDescriptor>,
-    engine_preferences: EnginePreferences,
-    workspace: WorkspaceState,
-    items: Vec<NodeSummary>,
-    selected_id: Option<String>,
-    selected_kind: Option<NodeKind>,
+    editor: EditorWorkspace,
+    explorer: ExplorerState,
+    browser: BrowserWorkspace,
+    shell: ShellWorkspace,
     active_section: SharedString,
     show_trash: bool,
     search_query: String,
@@ -117,11 +131,6 @@ struct IdeallDesktop {
     suppress_search_events: bool,
     search_input: Entity<InputState>,
     feed_key_input: Entity<InputState>,
-    title_input: Entity<InputState>,
-    body_input: Entity<InputState>,
-    code_input: Entity<InputState>,
-    active_engine_id: Option<String>,
-    embedded_browser: Option<Entity<WebView>>,
     sync_server_input: Entity<InputState>,
     sync_code_input: Entity<InputState>,
     sync_token_input: Entity<InputState>,
@@ -145,11 +154,6 @@ struct IdeallDesktop {
     agent_audits: Vec<AgentAuditRecord>,
     agent_threads: Vec<NodeSummary>,
     agent_activity_loading: bool,
-    body_editable: bool,
-    suppress_editor_events: bool,
-    draft_revision: u64,
-    autosave_task: Option<Task<()>>,
-    dirty: bool,
     status: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
 }
@@ -170,13 +174,19 @@ impl IdeallDesktop {
             InputState::new(window, cx)
                 .multi_line(true)
                 .rows(12)
-                .placeholder("从这里开始记录……")
+                .searchable(true)
+                .placeholder("从这里开始记录；输入 / 插入内容块……")
         });
         let code_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .code_editor("markdown")
+                .searchable(true)
                 .placeholder("文件内容")
         });
+        let find_input = cx.new(|cx| InputState::new(window, cx).placeholder("在当前文件中查找"));
+        let replace_input = cx.new(|cx| InputState::new(window, cx).placeholder("替换为"));
+        let rename_input = cx.new(|cx| InputState::new(window, cx).placeholder("输入新名称"));
+        let explorer_resize_state = cx.new(|_| ResizableState::default());
         let sync_server = service.load_sync_settings().unwrap_or_default();
         let sync_server_input = cx.new(|cx| {
             InputState::new(window, cx)
@@ -251,37 +261,98 @@ impl IdeallDesktop {
                 this.mark_editor_dirty(cx);
             }
         });
-        let body_subscription = cx.subscribe(&body_input, |this, _, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change) {
-                this.mark_editor_dirty(cx);
-            }
-        });
+        let body_subscription = cx.subscribe_in(
+            &body_input,
+            window,
+            |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::Change => this.mark_editor_dirty(cx),
+                InputEvent::PressEnter { .. } => {
+                    this.complete_note_slash_after_enter(window, cx);
+                }
+                _ => {}
+            },
+        );
         let code_subscription = cx.subscribe(&code_input, |this, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
                 this.mark_editor_dirty(cx);
             }
         });
+        let find_subscription = cx.subscribe_in(
+            &find_input,
+            window,
+            |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::Change => {
+                    this.editor.find_cursor = 0;
+                    cx.notify();
+                }
+                InputEvent::PressEnter { .. } => {
+                    this.find_next_in_editor(window, cx);
+                }
+                _ => {}
+            },
+        );
+        let replace_subscription = cx.subscribe(&replace_input, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        });
+        let body_observer = cx.observe(&body_input, |_, _, cx| cx.notify());
+        let code_observer = cx.observe(&code_input, |_, _, cx| cx.notify());
         let search_subscription =
             cx.subscribe(&search_input, |this, input, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) && !this.suppress_search_events {
                     this.schedule_search(input.read(cx).value().to_string(), cx);
                 }
             });
+        let rename_subscription = cx.subscribe_in(
+            &rename_input,
+            window,
+            |this, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.commit_explorer_rename(window, cx);
+                }
+            },
+        );
+        let explorer_resize_subscription = cx.subscribe(
+            &explorer_resize_state,
+            |this, state, _: &ResizablePanelEvent, cx| {
+                if let Some(width) = state.read(cx).sizes().first() {
+                    this.explorer.update_panel_width(width.as_f32());
+                    this.persist_workspace();
+                }
+            },
+        );
         let items = service.list_home().unwrap_or_default();
         let workspace = service.load_workspace_state().unwrap_or_default();
+        let explorer_layout = workspace.explorer.clone();
         let engine_preferences = service.load_engine_preferences().unwrap_or_default();
+        let editor = EditorWorkspace::new(
+            builtin_engines(),
+            engine_preferences,
+            workspace,
+            EditorInputs {
+                title: title_input,
+                body: body_input,
+                code: code_input,
+                find: find_input,
+                replace: replace_input,
+            },
+        );
+        let explorer =
+            ExplorerState::new(items, explorer_layout, rename_input, explorer_resize_state);
+        let browser = BrowserWorkspace::new();
+        let shell = ShellWorkspace::new(window, cx);
+        let shell_subscription = shell.subscribe(window, cx);
         let window_activation =
             cx.observe_window_activation(window, Self::window_activation_changed);
         let mut this = Self {
             database_path,
             service,
             secret_store,
-            engines: builtin_engines(),
-            engine_preferences,
-            workspace,
-            items,
-            selected_id: None,
-            selected_kind: None,
+            editor,
+            explorer,
+            browser,
+            shell,
             active_section: "我的".into(),
             show_trash: false,
             search_query: String::new(),
@@ -290,11 +361,6 @@ impl IdeallDesktop {
             suppress_search_events: false,
             search_input,
             feed_key_input,
-            title_input,
-            body_input,
-            code_input,
-            active_engine_id: None,
-            embedded_browser: None,
             sync_server_input,
             sync_code_input,
             sync_token_input,
@@ -318,30 +384,39 @@ impl IdeallDesktop {
             agent_audits: Vec::new(),
             agent_threads: Vec::new(),
             agent_activity_loading: false,
-            body_editable: false,
-            suppress_editor_events: false,
-            draft_revision: 0,
-            autosave_task: None,
-            dirty: false,
             status: None,
             _subscriptions: vec![
                 title_subscription,
                 body_subscription,
                 code_subscription,
+                find_subscription,
+                replace_subscription,
+                body_observer,
+                code_observer,
                 search_subscription,
+                rename_subscription,
+                explorer_resize_subscription,
+                shell_subscription,
                 window_activation,
             ],
         };
-        let active_tab = this.workspace.active_id.as_deref().and_then(|active_id| {
-            this.workspace
-                .tabs
-                .iter()
-                .find(|tab| tab_key(tab) == active_id)
-                .map(|tab| (tab.file.file_id.clone(), tab.engine_id.clone()))
-        });
+        let active_tab = this
+            .editor
+            .workspace
+            .active_id
+            .as_deref()
+            .and_then(|active_id| {
+                this.editor
+                    .workspace
+                    .tabs
+                    .iter()
+                    .find(|tab| tab_key(tab) == active_id)
+                    .map(|tab| (tab.file.file_id.clone(), tab.engine_id.clone()))
+            });
         if let Some((id, engine_id)) = active_tab {
             this.load_node_into_editor(&id, window, cx);
             this.activate_engine(&engine_id, &id, window, cx);
+            this.editor.restore_active_session(window, cx);
         }
         this
     }
@@ -369,7 +444,7 @@ impl IdeallDesktop {
             })
         };
         match result {
-            Ok(items) => self.items = items,
+            Ok(items) => self.explorer.replace_items(items),
             Err(error) => self.status = Some(error.to_string().into()),
         }
     }
@@ -416,7 +491,7 @@ impl IdeallDesktop {
                     match result {
                         Ok(items) => {
                             let count = items.len();
-                            this.items = items;
+                            this.explorer.replace_items(items);
                             this.status = Some(format!("找到 {count} 条本地内容").into());
                         }
                         Err(error) => {
@@ -434,6 +509,9 @@ impl IdeallDesktop {
         let parent = self.creation_parent();
         match self.service.create_note(parent.as_deref(), "无标题笔记") {
             Ok(node) => {
+                if let Some(parent) = parent {
+                    self.explorer.reveal_folder(parent);
+                }
                 self.show_trash = false;
                 self.refresh_items();
                 self.open_node(node.base().id.clone(), window, cx);
@@ -448,6 +526,10 @@ impl IdeallDesktop {
         let parent = self.creation_parent();
         match self.service.create_folder(parent.as_deref(), "新建文件夹") {
             Ok(node) => {
+                if let Some(parent) = parent {
+                    self.explorer.reveal_folder(parent);
+                }
+                self.explorer.reveal_folder(node.base().id.clone());
                 self.show_trash = false;
                 self.refresh_items();
                 self.open_node(node.base().id.clone(), window, cx);
@@ -465,6 +547,9 @@ impl IdeallDesktop {
             .create_bookmark(parent.as_deref(), "新建书签", "https://example.com/")
         {
             Ok(node) => {
+                if let Some(parent) = parent {
+                    self.explorer.reveal_folder(parent);
+                }
                 self.show_trash = false;
                 self.refresh_items();
                 self.open_node(node.base().id.clone(), window, cx);
@@ -482,6 +567,9 @@ impl IdeallDesktop {
             .create_file(parent.as_deref(), "新建文本.txt", "text/plain", Vec::new())
         {
             Ok(node) => {
+                if let Some(parent) = parent {
+                    self.explorer.reveal_folder(parent);
+                }
                 self.show_trash = false;
                 self.refresh_items();
                 self.open_node(node.base().id.clone(), window, cx);
@@ -547,6 +635,9 @@ impl IdeallDesktop {
                                 }
                             }
                         }
+                        if let Some(parent) = parent {
+                            this.explorer.reveal_folder(parent);
+                        }
                         this.refresh_items();
                         this.status = Some(format!("已导入 {imported} 个文件").into());
                         cx.notify();
@@ -567,9 +658,11 @@ impl IdeallDesktop {
     }
 
     fn creation_parent(&self) -> Option<String> {
-        (self.selected_kind == Some(NodeKind::Folder))
-            .then(|| self.selected_id.clone())
-            .flatten()
+        self.explorer.selected_folder_id().or_else(|| {
+            (self.editor.selected_kind == Some(NodeKind::Folder))
+                .then(|| self.editor.selected_id.clone())
+                .flatten()
+        })
     }
 
     fn load_node_into_editor(
@@ -581,35 +674,35 @@ impl IdeallDesktop {
         match self.service.node(id) {
             Ok(node) => {
                 self.detach_pending_autosave(cx);
-                self.suppress_editor_events = true;
+                let kind = node.kind();
                 let title = node.base().title.clone();
                 let (body, editable, protected_blocks) = self.node_body(&node);
-                self.title_input
-                    .update(cx, |input, cx| input.set_value(title.clone(), window, cx));
-                self.body_input
-                    .update(cx, |input, cx| input.set_value(body.clone(), window, cx));
-                self.code_input.update(cx, |input, cx| {
-                    input.set_highlighter(code_language_for_node(&self.service, id), cx);
-                    input.set_value(body, window, cx);
-                });
-                self.suppress_editor_events = false;
-                self.selected_kind = Some(node.kind());
-                self.selected_id = Some(id.to_owned());
-                self.body_editable = editable;
-                self.dirty = false;
-                self.status = if node.kind() == NodeKind::Note && protected_blocks > 0 {
+                let language = code_language_for_node(&self.service, id);
+                self.editor.load_document(
+                    LoadedDocument {
+                        id: id.to_owned(),
+                        kind,
+                        title: title.clone(),
+                        body,
+                        language,
+                        editable,
+                    },
+                    window,
+                    cx,
+                );
+                self.status = if kind == NodeKind::Note && protected_blocks > 0 {
                     Some(
                         format!(
                             "可编辑常用 Markdown 块；{protected_blocks} 个未知富文本块以指纹占位保护，请勿修改占位行"
                         )
                         .into(),
                     )
-                } else if node.kind() == NodeKind::File && !editable {
+                } else if kind == NodeKind::File && !editable {
                     Some("此二进制类型在 ideall 中只读；可导出临时副本并用系统应用打开".into())
                 } else {
                     None
                 };
-                Some((node.kind(), title))
+                Some((kind, title))
             }
             Err(error) => {
                 self.status = Some(error.to_string().into());
@@ -619,8 +712,15 @@ impl IdeallDesktop {
     }
 
     fn open_node(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dirty && self.selected_id.as_deref() == Some(id.as_str()) {
+        self.explorer.select(id.clone());
+        if self.editor.dirty && self.editor.selected_id.as_deref() == Some(id.as_str()) {
             return;
+        }
+        if self.editor.dirty {
+            self.save(window, cx);
+            if self.editor.dirty {
+                return;
+            }
         }
         if let Some((kind, title)) = self.load_node_into_editor(&id, window, cx)
             && !self.show_trash
@@ -630,12 +730,17 @@ impl IdeallDesktop {
                 .file_metadata(&id)
                 .ok()
                 .and_then(|file| {
-                    resolve_default_engine(&self.engines, &file, &self.engine_preferences)
+                    resolve_default_engine(
+                        &self.editor.engines,
+                        &file,
+                        &self.editor.engine_preferences,
+                    )
                 })
                 .map(|resolution| resolution.candidate.descriptor.engine_id)
                 .unwrap_or_else(|| engine_id(kind).into());
             self.activate_engine(&engine_id, &id, window, cx);
-            self.workspace.open(TabDescriptor {
+            self.editor.restore_active_session(window, cx);
+            self.editor.workspace.open(TabDescriptor {
                 file: FileRef::new("local.nodes", &id),
                 engine_id,
                 title,
@@ -654,8 +759,8 @@ impl IdeallDesktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.active_engine_id = Some(engine_id.to_owned());
-        self.embedded_browser = None;
+        self.editor.active_engine_id = Some(engine_id.to_owned());
+        self.browser.clear();
         if engine_id != "ideall.browser" {
             return;
         }
@@ -663,13 +768,7 @@ impl IdeallDesktop {
             Ok(Node::Bookmark { content, .. }) => content.url,
             _ => return,
         };
-        match create_embedded_browser(&url, window, cx) {
-            Ok(browser) => {
-                self.embedded_browser = Some(browser);
-                self.status = Some("已在隔离的系统 WebView 中打开书签".into());
-            }
-            Err(error) => self.status = Some(error.into()),
-        }
+        self.navigate_browser_to(&url, true, window, cx);
     }
 
     fn node_body(&self, node: &Node) -> (String, bool, usize) {
@@ -705,25 +804,21 @@ impl IdeallDesktop {
     }
 
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.selected_id.clone() else {
+        let Some(draft) = self.editor.draft(cx) else {
             return;
         };
-        self.autosave_task.take();
-        let title = self.title_input.read(cx).value().to_string();
-        let body = if self.active_engine_id.as_deref() == Some("ideall.code") {
-            self.code_input.read(cx).value().to_string()
-        } else {
-            self.body_input.read(cx).value().to_string()
-        };
-        let result =
-            self.service
-                .save_edits(&id, title, self.body_editable.then_some(body.as_str()));
+        self.editor.autosave_task.take();
+        let result = self.service.save_edits(
+            &draft.id,
+            draft.title,
+            draft.body_editable.then_some(draft.body.as_str()),
+        );
         match result {
             Ok(_) => {
+                self.editor.dirty = false;
                 self.refresh_items();
-                self.open_node(id, window, cx);
+                self.open_node(draft.id, window, cx);
                 self.status = Some("已保存到本地 SQLite".into());
-                self.dirty = false;
             }
             Err(error) => self.status = Some(error.to_string().into()),
         }
@@ -731,33 +826,27 @@ impl IdeallDesktop {
     }
 
     fn mark_editor_dirty(&mut self, cx: &mut Context<Self>) {
-        if self.suppress_editor_events || self.selected_id.is_none() || self.show_trash {
+        if self.show_trash || self.editor.mark_dirty().is_none() {
             return;
         }
-        self.dirty = true;
-        self.draft_revision = self.draft_revision.wrapping_add(1);
         self.schedule_draft_save(DRAFT_AUTOSAVE_DELAY, cx);
         cx.notify();
     }
 
     fn schedule_draft_save(&mut self, delay: Duration, cx: &mut Context<Self>) {
-        if !self.dirty {
+        if !self.editor.dirty {
             return;
         }
-        let Some(id) = self.selected_id.clone() else {
+        let Some(draft) = self.editor.draft(cx) else {
             return;
         };
-        let revision = self.draft_revision;
-        let title = self.title_input.read(cx).value().to_string();
-        let body = if self.active_engine_id.as_deref() == Some("ideall.code") {
-            self.code_input.read(cx).value().to_string()
-        } else {
-            self.body_input.read(cx).value().to_string()
-        };
-        let body = self.body_editable.then_some(body);
+        let revision = self.editor.draft_revision;
+        let id = draft.id;
+        let title = draft.title;
+        let body = draft.body_editable.then_some(draft.body);
         let database_path = self.database_path.clone();
         let timer = cx.background_executor().timer(delay);
-        self.autosave_task = Some(cx.spawn(async move |view, cx| {
+        self.editor.autosave_task = Some(cx.spawn(async move |view, cx| {
             timer.await;
             let save_task = cx.background_executor().spawn(async move {
                 let mut workspace =
@@ -773,7 +862,7 @@ impl IdeallDesktop {
                     return;
                 };
                 view.update(cx, |this, cx| {
-                    if this.draft_revision != revision {
+                    if this.editor.draft_revision != revision {
                         if let Err(error) = &result {
                             this.status = Some(format!("上一项草稿自动保存失败：{error}").into());
                             cx.notify();
@@ -782,14 +871,28 @@ impl IdeallDesktop {
                     }
                     match result {
                         Ok((id, summary)) => {
-                            if this.selected_id.as_deref() != Some(id.as_str()) {
+                            if this.editor.selected_id.as_deref() != Some(id.as_str()) {
                                 return;
                             }
-                            if let Some(item) = this.items.iter_mut().find(|item| item.id == id) {
-                                item.title = summary.title;
+                            if let Some(item) =
+                                this.explorer.items.iter_mut().find(|item| item.id == id)
+                            {
+                                item.title = summary.title.clone();
                                 item.updated_at = summary.updated_at;
                             }
-                            this.dirty = false;
+                            for tab in &mut this.editor.workspace.tabs {
+                                if tab.file.file_id == id {
+                                    tab.title = summary.title.clone();
+                                }
+                            }
+                            if this.editor.selected_kind == Some(NodeKind::File) {
+                                let language = code_language_for_node(&this.service, &id);
+                                this.editor
+                                    .code_input
+                                    .update(cx, |input, cx| input.set_highlighter(language, cx));
+                            }
+                            this.persist_workspace();
+                            this.editor.dirty = false;
                             this.status = Some("已自动保存到本地 SQLite".into());
                         }
                         Err(error) => {
@@ -803,11 +906,11 @@ impl IdeallDesktop {
     }
 
     fn detach_pending_autosave(&mut self, cx: &mut Context<Self>) {
-        if self.dirty {
+        if self.editor.dirty {
             self.schedule_draft_save(Duration::ZERO, cx);
         }
-        self.draft_revision = self.draft_revision.wrapping_add(1);
-        if let Some(task) = self.autosave_task.take() {
+        self.editor.draft_revision = self.editor.draft_revision.wrapping_add(1);
+        if let Some(task) = self.editor.autosave_task.take() {
             task.detach();
         }
     }
@@ -860,22 +963,22 @@ impl IdeallDesktop {
     }
 
     fn open_bookmark_external(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.selected_id.clone() else {
+        let Some(id) = self.editor.selected_id.clone() else {
             return;
         };
-        if self.selected_kind != Some(NodeKind::Bookmark) {
+        if self.editor.selected_kind != Some(NodeKind::Bookmark) {
             return;
         }
 
-        if self.dirty {
-            let title = self.title_input.read(cx).value().to_string();
-            let url = self.body_input.read(cx).value().to_string();
+        if self.editor.dirty {
+            let title = self.editor.title_input.read(cx).value().to_string();
+            let url = self.editor.body_input.read(cx).value().to_string();
             if let Err(error) = self.service.save_edits(&id, title, Some(&url)) {
                 self.status = Some(error.to_string().into());
                 cx.notify();
                 return;
             }
-            self.dirty = false;
+            self.editor.dirty = false;
             self.refresh_items();
             self.load_node_into_editor(&id, window, cx);
         }
@@ -899,23 +1002,12 @@ impl IdeallDesktop {
         cx: &mut Context<Self>,
     ) {
         self.clear_selection(window, cx);
-        self.active_engine_id = Some(engine_id.into());
-        match create_embedded_browser(url, window, cx) {
-            Ok(browser) => {
-                self.embedded_browser = Some(browser);
-                self.status =
-                    Some("已在隔离的系统 WebView 中打开；未注入本地文件或密钥能力".into());
-            }
-            Err(error) => {
-                cx.open_url(url);
-                self.status = Some(format!("{error}；已交给系统浏览器").into());
-            }
-        }
-        cx.notify();
+        self.editor.active_engine_id = Some(engine_id.into());
+        self.navigate_browser_to(url, true, window, cx);
     }
 
     fn open_file_with_system(&mut self, cx: &mut Context<Self>) {
-        let Some(id) = self.selected_id.clone() else {
+        let Some(id) = self.editor.selected_id.clone() else {
             return;
         };
         let node = match self.service.node(&id) {
@@ -954,18 +1046,19 @@ impl IdeallDesktop {
     }
 
     fn move_selected_to_trash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dirty {
+        if self.editor.dirty {
             self.save(window, cx);
-            if self.dirty {
+            if self.editor.dirty {
                 return;
             }
         }
-        let Some(id) = self.selected_id.clone() else {
+        let Some(id) = self.editor.selected_id.clone() else {
             return;
         };
         match self.service.move_to_trash(&id) {
             Ok(true) => {
                 let tab_ids = self
+                    .editor
                     .workspace
                     .tabs
                     .iter()
@@ -973,7 +1066,7 @@ impl IdeallDesktop {
                     .map(tab_key)
                     .collect::<Vec<_>>();
                 for tab_id in tab_ids {
-                    self.workspace.close(&tab_id);
+                    self.editor.workspace.close(&tab_id);
                 }
                 self.persist_workspace();
                 self.clear_selection(window, cx);
@@ -986,8 +1079,45 @@ impl IdeallDesktop {
         cx.notify();
     }
 
+    fn move_explorer_selection_to_trash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.explorer.selection_id.clone() else {
+            return;
+        };
+        if self.editor.selected_id.as_deref() == Some(id.as_str()) && self.editor.dirty {
+            self.save(window, cx);
+            if self.editor.dirty {
+                return;
+            }
+        }
+        match self.service.move_to_trash(&id) {
+            Ok(true) => {
+                let tab_ids = self
+                    .editor
+                    .workspace
+                    .tabs
+                    .iter()
+                    .filter(|tab| tab.file.file_id == id)
+                    .map(tab_key)
+                    .collect::<Vec<_>>();
+                for tab_id in tab_ids {
+                    self.editor.workspace.close(&tab_id);
+                }
+                if self.editor.selected_id.as_deref() == Some(id.as_str()) {
+                    self.clear_selection(window, cx);
+                }
+                self.explorer.clear_selection();
+                self.refresh_items();
+                self.persist_workspace();
+                self.status = Some("已移到回收站".into());
+            }
+            Ok(false) => self.status = Some("项目已不在当前列表".into()),
+            Err(error) => self.status = Some(error.to_string().into()),
+        }
+        cx.notify();
+    }
+
     fn restore_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.selected_id.clone() else {
+        let Some(id) = self.editor.selected_id.clone() else {
             return;
         };
         match self.service.restore(&id) {
@@ -1003,7 +1133,7 @@ impl IdeallDesktop {
     }
 
     fn purge_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.selected_id.clone() else {
+        let Some(id) = self.editor.selected_id.clone() else {
             return;
         };
         match self.service.purge(&id) {
@@ -1046,8 +1176,25 @@ impl IdeallDesktop {
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.suppress_search_events = false;
         self.active_section = "我的".into();
-        self.clear_selection(window, cx);
+        self.explorer.clear_selection();
         self.refresh_items();
+        if self.editor.selected_id.is_none()
+            && let Some(file_id) =
+                self.editor
+                    .workspace
+                    .active_id
+                    .as_deref()
+                    .and_then(|active_id| {
+                        self.editor
+                            .workspace
+                            .tabs
+                            .iter()
+                            .find(|tab| tab_key(tab) == active_id)
+                            .map(|tab| tab.file.file_id.clone())
+                    })
+        {
+            self.open_node(file_id, window, cx);
+        }
         cx.notify();
     }
 
@@ -1070,6 +1217,7 @@ impl IdeallDesktop {
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.suppress_search_events = false;
         self.active_section = section.into();
+        self.explorer.clear_selection();
         self.clear_selection(window, cx);
         self.refresh_items();
         self.status = match section {
@@ -1698,6 +1846,7 @@ impl IdeallDesktop {
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.suppress_search_events = false;
         self.active_section = "回收站".into();
+        self.explorer.clear_selection();
         self.clear_selection(window, cx);
         self.refresh_items();
         cx.notify();
@@ -1705,38 +1854,270 @@ impl IdeallDesktop {
 
     fn clear_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.detach_pending_autosave(cx);
-        self.suppress_editor_events = true;
-        self.selected_id = None;
-        self.selected_kind = None;
-        self.body_editable = false;
-        self.dirty = false;
-        self.title_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.body_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.code_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.suppress_editor_events = false;
-        self.active_engine_id = None;
-        self.embedded_browser = None;
+        self.editor.clear(window, cx);
+        self.browser.clear();
+    }
+
+    fn toggle_folder(&mut self, id: String, cx: &mut Context<Self>) {
+        self.explorer.toggle_folder(id);
+        self.persist_workspace();
+        cx.notify();
+    }
+
+    fn show_editor_find(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.editor.has_selection() {
+            self.status = Some("请先打开一个文件或笔记".into());
+            cx.notify();
+            return;
+        }
+        self.editor.find_visible = true;
+        self.editor.replace_visible = replace;
+        self.editor.find_input.update(cx, |input, cx| {
+            input.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    fn hide_editor_find(&mut self, cx: &mut Context<Self>) {
+        self.editor.find_visible = false;
+        self.editor.replace_visible = false;
+        self.editor.find_cursor = 0;
+        cx.notify();
+    }
+
+    fn find_next_in_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let query = self.editor.find_input.read(cx).value().to_string();
+        if query.is_empty() {
+            self.status = Some("请输入查找内容".into());
+            cx.notify();
+            return;
+        }
+        let text = self.editor.active_text(cx);
+        let start = self.editor.find_cursor.min(text.len());
+        let found = text[start..]
+            .find(&query)
+            .map(|offset| start + offset)
+            .or_else(|| text[..start].find(&query));
+        let Some(offset) = found else {
+            self.status = Some("当前文件中没有匹配项".into());
+            cx.notify();
+            return;
+        };
+        self.editor.find_cursor = offset + query.len();
+        let position = position_for_byte_offset(&text, offset);
+        self.editor.active_input().update(cx, |input, cx| {
+            input.set_cursor_position(position, window, cx)
+        });
+        self.status = Some(format!("第 {} 行找到匹配项", position.line.saturating_add(1)).into());
+        cx.notify();
+    }
+
+    fn replace_all_in_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.editor.body_editable || self.show_trash {
+            self.status = Some("当前内容为只读，不能替换".into());
+            cx.notify();
+            return;
+        }
+        let query = self.editor.find_input.read(cx).value().to_string();
+        if query.is_empty() {
+            self.status = Some("请输入查找内容".into());
+            cx.notify();
+            return;
+        }
+        let replacement = self.editor.replace_input.read(cx).value().to_string();
+        let text = self.editor.active_text(cx);
+        let count = text.match_indices(&query).count();
+        if count == 0 {
+            self.status = Some("当前文件中没有匹配项".into());
+            cx.notify();
+            return;
+        }
+        let replaced = text.replace(&query, &replacement);
+        self.editor.suppress_events = true;
+        if self.editor.active_engine_id.as_deref() == Some("ideall.code") {
+            self.editor
+                .code_input
+                .update(cx, |input, cx| input.set_value(replaced, window, cx));
+        } else {
+            self.editor
+                .body_input
+                .update(cx, |input, cx| input.set_value(replaced, window, cx));
+        }
+        self.editor.suppress_events = false;
+        self.editor.find_cursor = 0;
+        self.mark_editor_dirty(cx);
+        self.status = Some(format!("已替换 {count} 处，等待自动保存").into());
+        cx.notify();
+    }
+
+    fn expand_all_folders(&mut self, cx: &mut Context<Self>) {
+        self.explorer.expand_all();
+        self.persist_workspace();
+        cx.notify();
+    }
+
+    fn collapse_all_folders(&mut self, cx: &mut Context<Self>) {
+        self.explorer.collapse_all();
+        self.persist_workspace();
+        cx.notify();
+    }
+
+    fn toggle_project_panel(&mut self, cx: &mut Context<Self>) {
+        self.explorer.toggle_panel();
+        self.persist_workspace();
+        cx.notify();
+    }
+
+    fn begin_explorer_rename(
+        &mut self,
+        id: String,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.explorer.begin_rename(id, title, window, cx);
+    }
+
+    fn begin_selected_explorer_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(selected_id) = self.explorer.selection_id.clone() else {
+            return;
+        };
+        let Some(item) = self
+            .explorer
+            .items
+            .iter()
+            .find(|item| item.id == selected_id)
+        else {
+            return;
+        };
+        self.begin_explorer_rename(item.id.clone(), item.title.clone(), window, cx);
+    }
+
+    fn open_selected_explorer_node(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(selected_id) = self.explorer.selection_id.clone() else {
+            return;
+        };
+        let is_folder = self
+            .explorer
+            .items
+            .iter()
+            .find(|item| item.id == selected_id)
+            .is_some_and(|item| item.kind == NodeKind::Folder);
+        if is_folder {
+            self.toggle_folder(selected_id, cx);
+        } else {
+            self.open_node(selected_id, window, cx);
+        }
+    }
+
+    fn select_relative_explorer_node(&mut self, offset: isize, cx: &mut Context<Self>) {
+        let preserve_full_list = self.active_section.as_ref() != "我的";
+        if self.explorer.select_relative(preserve_full_list, offset) {
+            cx.notify();
+        }
+    }
+
+    fn cancel_explorer_rename(&mut self, cx: &mut Context<Self>) {
+        self.explorer.cancel_rename();
+        cx.notify();
+    }
+
+    fn commit_explorer_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.explorer.renaming_id.clone() else {
+            return;
+        };
+        let Some(rename_input) = self.explorer.rename_input.clone() else {
+            return;
+        };
+        let title = rename_input.read(cx).value().trim().to_owned();
+        match self.service.rename(&id, title.clone()) {
+            Ok(_) => {
+                self.explorer.cancel_rename();
+                if self.editor.selected_id.as_deref() == Some(id.as_str()) {
+                    self.editor.suppress_events = true;
+                    self.editor
+                        .title_input
+                        .update(cx, |input, cx| input.set_value(title.clone(), window, cx));
+                    self.editor.suppress_events = false;
+                    if self.editor.selected_kind == Some(NodeKind::File) {
+                        let language = code_language_for_node(&self.service, &id);
+                        self.editor
+                            .code_input
+                            .update(cx, |input, cx| input.set_highlighter(language, cx));
+                    }
+                }
+                for tab in &mut self.editor.workspace.tabs {
+                    if tab.file.file_id == id {
+                        tab.title = title.clone();
+                    }
+                }
+                self.refresh_items();
+                self.persist_workspace();
+                self.status = Some("名称已更新".into());
+            }
+            Err(error) => self.status = Some(error.to_string().into()),
+        }
+        cx.notify();
+    }
+
+    fn move_explorer_node(
+        &mut self,
+        id: String,
+        parent_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        match self.service.move_node(&id, parent_id.as_deref()) {
+            Ok(_) => {
+                if let Some(parent_id) = parent_id {
+                    self.explorer.reveal_folder(parent_id);
+                }
+                self.refresh_items();
+                self.persist_workspace();
+                self.status = Some("项目已移动".into());
+            }
+            Err(error) => self.status = Some(error.to_string().into()),
+        }
+        cx.notify();
     }
 
     fn activate_tab(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
-        if self.workspace.activate(&id)
-            && let Some(tab) = self.workspace.tabs.iter().find(|tab| tab_key(tab) == id)
-        {
-            self.open_node(tab.file.file_id.clone(), window, cx);
+        if let Some(file_id) = self.editor.activate_tab(&id) {
+            self.open_node(file_id, window, cx);
         }
         self.persist_workspace();
     }
 
     fn close_tab(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.workspace.close(&id) {
+        if self.editor.dirty && self.editor.workspace.active_id.as_deref() == Some(id.as_str()) {
+            self.save(window, cx);
+            if self.editor.dirty {
+                return;
+            }
+        }
+        let closed_file_id = self
+            .editor
+            .workspace
+            .tabs
+            .iter()
+            .find(|tab| tab_key(tab) == id)
+            .map(|tab| tab.file.file_id.clone());
+        if !self.editor.workspace.close(&id) {
             return;
         }
+        if let Some(file_id) = closed_file_id
+            && !self
+                .editor
+                .workspace
+                .tabs
+                .iter()
+                .any(|tab| tab.file.file_id == file_id)
+        {
+            self.editor.remove_session(&file_id);
+        }
         self.persist_workspace();
-        if let Some(active_id) = self.workspace.active_id.clone()
+        if let Some(active_id) = self.editor.workspace.active_id.clone()
             && let Some(tab) = self
+                .editor
                 .workspace
                 .tabs
                 .iter()
@@ -1750,7 +2131,8 @@ impl IdeallDesktop {
     }
 
     fn persist_workspace(&mut self) {
-        if let Err(error) = self.service.save_workspace_state(&self.workspace) {
+        self.editor.workspace.explorer = self.explorer.layout_state();
+        if let Err(error) = self.service.save_workspace_state(&self.editor.workspace) {
             self.status = Some(error.to_string().into());
         }
     }
@@ -1761,17 +2143,17 @@ impl IdeallDesktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.dirty {
+        if self.editor.dirty {
             self.save(window, cx);
-            if self.dirty {
+            if self.editor.dirty {
                 return;
             }
         }
-        let Some(id) = self.selected_id.clone() else {
+        let Some(id) = self.editor.selected_id.clone() else {
             return;
         };
         let result = self.service.file_metadata(&id).and_then(|file| {
-            let supported = list_matching_engines(&self.engines, &file)
+            let supported = list_matching_engines(&self.editor.engines, &file)
                 .iter()
                 .any(|candidate| candidate.descriptor.engine_id == engine_id);
             if !supported {
@@ -1783,11 +2165,12 @@ impl IdeallDesktop {
             let key = file.r#ref.to_key().map_err(|error| {
                 ideall_application::ApplicationError::InvalidFileRef(error.to_string())
             })?;
-            self.engine_preferences
+            self.editor
+                .engine_preferences
                 .files
                 .insert(key, engine_id.to_owned());
             self.service
-                .save_engine_preferences(&self.engine_preferences)
+                .save_engine_preferences(&self.editor.engine_preferences)
         });
         match result {
             Ok(()) => {
@@ -1808,17 +2191,6 @@ fn engine_id(kind: NodeKind) -> &'static str {
         NodeKind::File => "ideall.preview",
         NodeKind::Feed => "ideall.feed",
         NodeKind::Thread => "ideall.thread",
-    }
-}
-
-fn kind_icon(kind: NodeKind) -> &'static str {
-    match kind {
-        NodeKind::Folder => "▸",
-        NodeKind::Note => "N",
-        NodeKind::Bookmark => "↗",
-        NodeKind::File => "F",
-        NodeKind::Feed => "◎",
-        NodeKind::Thread => "#",
     }
 }
 
@@ -1855,56 +2227,6 @@ fn acp_tool_status_label(status: AcpToolStatus) -> &'static str {
         AcpToolStatus::Completed => "完成",
         AcpToolStatus::Failed => "失败",
     }
-}
-
-fn code_language_for_node(service: &LocalWorkspace, id: &str) -> &'static str {
-    let Ok(file) = service.file_metadata(id) else {
-        return "markdown";
-    };
-    let extension = file
-        .name
-        .rsplit_once('.')
-        .map(|(_, extension)| extension.to_ascii_lowercase());
-    match (file.media_type.as_str(), extension.as_deref()) {
-        (_, Some("rs")) => "rust",
-        (_, Some("ts" | "tsx")) => "typescript",
-        (_, Some("js" | "jsx" | "mjs" | "cjs")) => "javascript",
-        ("application/json", _) | (_, Some("json")) => "json",
-        ("text/markdown", _) | (_, Some("md" | "mdx")) => "markdown",
-        (_, Some("toml")) => "toml",
-        (_, Some("yaml" | "yml")) => "yaml",
-        ("text/html", _) | (_, Some("html" | "htm")) => "html",
-        ("text/css", _) | (_, Some("css")) => "css",
-        (_, Some("py")) => "python",
-        (_, Some("go")) => "go",
-        (_, Some("c" | "h")) => "c",
-        (_, Some("cc" | "cpp" | "cxx" | "hpp")) => "cpp",
-        (_, Some("sh" | "bash")) => "bash",
-        (_, Some("sql")) => "sql",
-        _ => "markdown",
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-fn create_embedded_browser(
-    url: &str,
-    window: &mut Window,
-    cx: &mut Context<IdeallDesktop>,
-) -> Result<Entity<WebView>, String> {
-    let webview = wry::WebViewBuilder::new()
-        .with_url(url)
-        .build_as_child(window)
-        .map_err(|error| error.to_string())?;
-    Ok(cx.new(|cx| WebView::new(webview, window, cx)))
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn create_embedded_browser(
-    _url: &str,
-    _window: &mut Window,
-    _cx: &mut Context<IdeallDesktop>,
-) -> Result<Entity<WebView>, String> {
-    Err("当前 Linux GPUI 后端不支持可靠的子窗口 WebView；可使用“系统浏览器打开”".into())
 }
 
 fn native_database_path() -> Result<PathBuf, String> {
@@ -1955,6 +2277,7 @@ fn main() {
         .map(|error| format!("无法初始化系统安全存储：{error}"));
     Application::new().run(move |cx: &mut App| {
         gpui_component::init(cx);
+        Theme::change(ThemeMode::Light, None, cx);
         actions::init(cx);
         let initialized = (|| {
             if let Some(error) = secure_store_error {

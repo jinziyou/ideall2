@@ -4269,6 +4269,8 @@ dependencies = [
  "ideall-sync-http",
  "ideall-updater",
  "lb-wry",
+ "shell-words",
+ "url",
 ]
 
 [[package]]

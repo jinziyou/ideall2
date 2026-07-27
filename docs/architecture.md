@@ -1,9 +1,9 @@
 # ideall 架构
 
-> 本文是 ideall 的架构权威说明，面向贡献者与集成方。产品定位与上手步骤见
-> [README.md](../README.md)；App（桌面/移动）打包细节见
-> [`native/README.md`](../native/README.md)。本文后半仍保留部分旧 TypeScript 模块名，
-> 仅用于解释 V2 归档兼容映射；生产依赖边界以 `native/` Cargo workspace 为准。
+> 本文给出当前生产架构的高层边界，并保留旧 TypeScript/Tauri 数据模型用于解释 V2
+> 归档兼容。生产依赖以 `native/` Cargo workspace 为准；桌面组件细节见
+> [desktop-components.md](design/desktop-components.md)，构建和平台入口见
+> [`native/README.md`](../native/README.md)。
 
 ## 1. 概览
 
@@ -25,7 +25,7 @@ ideall 是**开源、本地优先的个人信息终端**：把分散的他人、
 
 **设计风格：现代 · 面板 · 留白**——面板化的标签工作区（活动栏 / 二级侧栏 / 标签条 / 状态栏 / 命令台），克制的留白与现代质感，不堆砌、让信息呼吸。这套 IDE 式标签工作区是 ideall 自有的设计语言：以「文件 + 标签页」为骨架，把发现、阅读、笔记、对话统一进同一个面板化外壳。
 
-## 2. 领域模型
+## 2. 领域模型与 V2 兼容映射
 
 ideall 的领域类型分两类：**本地拥有**（存 SQLite，本机即权威）与**后端供给**（经
 服务适配器取数，ideall 用自己的领域词汇定义）。生产契约位于
@@ -33,7 +33,8 @@ ideall 的领域类型分两类：**本地拥有**（存 SQLite，本机即权�
 
 ### 2.1 统一 Node 模型（一切皆文件）
 
-`ideall.core` 拥有的领域内容收敛为单一可辨识联合 `Node`（`protocol/node.ts`），由 `kind` 区分六类，共存于同一个 IndexedDB 对象仓 `STORE_NODES`。音频、数据库、Agent 配置与第三方 App 等其它 Storage 不强行写入 Node 仓，而是通过各自 FileSystem 投影到同一命名空间：
+生产 `Node` 契约位于 `native/crates/ideall-protocol`，本地权威存储为 SQLite。下表沿用旧
+TypeScript 类型名和 `STORE_NODES` 术语，仅用于说明 V2 归档投影；它们不是生产存储实现：
 
 | kind | 域类型（投影后） | 说明 |
 | --- | --- | --- |
@@ -70,7 +71,24 @@ ideall 的领域类型分两类：**本地拥有**（存 SQLite，本机即权�
 
 > `home/apps/info/community/tool` 是业务实现的代码边界，不直接等同于桌面导航分区。Display 从合成文件系统根生成五个固定一级入口；业务模块通过系统文件、Resource source 或 App 文件系统被打开。
 
-### 3.1 三种工作区与五分区导航
+当前 Rust 依赖固定为：
+
+```text
+ideall-protocol
+      ↓
+ideall-domain
+      ↓
+ideall-application
+      ↓
+storage / sync / agent / acp / secrets / updater
+      ↓
+ideall-desktop / ideall-mobile / ideall-cli
+```
+
+`ideall-presentation` 只共享导航、文案、设计 Token 和无框架请求状态。桌面组合根内的
+Editor、Explorer、Browser、Shell 是 UI 组件边界，不允许反向进入共享 crate。
+
+### 3.1 旧兼容模型：三种工作区与五分区导航
 
 工作区与视图是同一个概念，由 `WorkspaceKind` 表达。用户通过全局命令面板切换工作区：桌面端可按 `⌘K` / `Ctrl+K` 或点击顶栏搜索入口，移动端由移动顶栏唤起同一面板。工作区不进入活动栏、目录树或移动导航抽屉：
 
@@ -117,7 +135,7 @@ Agent workspace 的公开 state 与内部十进制 `_revision` 位于同一份 l
 
 本机内容、远端资源、系统能力与 App 挂载共享同一导航体系。音频和开发工具显示在工作区 Dock 中，关闭 Dock 会返回文件工作区。切换工作区不改变当前 `FileRef`、既有标签或脏草稿；活动项是文件时，会激活同一 `FileRef` 在新场景下的默认 Engine 标签，原 Engine 标签保留。隐藏的 AI `workspace` 目录不进入导航；AI 对话从文件工作区的右侧 Agent 面板到达，MCP、Skills 与规则从“设置 > AI”内的管理入口打开。
 
-### 3.2 五模块（「我的」/「应用」+ 三个发现模块）
+### 3.2 旧兼容模型：五模块
 
 home（即「我的」）是本机数据区，apps（应用）是本机已安装应用的启动器；info / community / tool 是三个**发现**模块——它们发现的内容经**关注汇入「我的」**的 `/home/following` 关注流。
 
@@ -137,12 +155,12 @@ home（即「我的」）是本机数据区，apps（应用）是本机已安装
 
 **一切皆文件（工作区，`src/workspace/*`）**：打开任意内容目标都会先规范成 `FileRef`，再由 Engine registry 解析渲染器并落入统一文件标签。精确 `/audio`、`/git`、`/database`、`/shell` 是 Workspace Dock 命令而非标签目标；需要完整 App surface 时使用相应 `FileRef + Engine` 深链。目录树通过 FileSystem `readDirectory/stat/watch` 展示合成根子树；0.2 工作区快照只接受 File + Engine 标签。专用目录 Engine 使用可读的规范路径作为标签 URL；同一根切换到其他 Engine 时回到含完整 `FileRef + engineId` 的深链，刷新不会丢失 Display 选择。异步文件打开采用按通道隔离的 last-request-wins，并在 `stat` 完成后按最新工作区解析默认 Engine，避免慢 provider 用旧场景抢回焦点。标签规范化、生命周期/LRU 策略和导航请求协调已从 store 副作用 facade 抽成纯模块。可序列化 dirty Engine 只有在有界、身份绑定的 session 快照成功后才允许被 LRU 休眠；失败时保持运行。工作区只改变 Display 组合和无显式偏好时的 Engine 默认选择，不复制文件或创建另一套导航。
 
-### 3.3 本地能力 vs 需后端能力
+### 3.3 旧兼容模型：本地能力与联网能力
 
 - **本地能力（不依赖后端）**：home 的书签/资源/关注偏好、tool 的本地功能和 BYO-key agent。数据存本机，可离线、无账号使用。跨端同步无需账号且只传密文，但同步动作需要可用的 Sync 服务；当前同步关注、笔记、书签与收藏夹。
 - **需后端能力**：info 的资讯/实体/分析、community 的发布者地图与发布、关注流的内容拉取、账号鉴权。全部经 `ServerPort` 消费。
 
-### 3.4 抽象层：终端分层（`src/` 下）
+### 3.4 旧兼容模型：`src/` 终端分层
 
 `src/` 已按「个人信息终端」的语义分层重组——路由层只负责打开目标或执行工作区命令，外壳、工作区、数据层、功能模块、插件、契约各成一层，契约纯端口独立成 `protocol`。
 
@@ -174,7 +192,7 @@ home（即「我的」）是本机数据区，apps（应用）是本机已安装
   `@/lib/server/port-registry` 的 `getServerPort()` 取得当前实现。
 - **UI 动作 / 活动节点**（守 plugins↛shell/workspace 边界）：插件经 `@/lib/ui-actions`（`UiActions`：开/关标签）与 `@/lib/active-node`（当前激活标签→`NodeRef`）两个端口与工作区交互，外壳在 boot 注入实现、插件只消费。
 
-### 3.5 AI `fs.*` 层（一切皆文件的 AI 侧）
+### 3.5 旧兼容模型：AI `fs.*` 层
 
 AI 不再持专有工具，而是经一套**文件系统语义**的 MCP 工具面 `fs.*`/`ui.*` 读写统一 Node 库——与嵌入页（embed）共用同一条 **Grant→MCP** 能力链路（`src/plugins/embed/*`）：
 
@@ -192,7 +210,7 @@ AI 不再持专有工具，而是经一套**文件系统语义**的 MCP 工具�
 
 **组合根**：`shell/boot.ts#registerAll()` 是唯一允许 import 各 manifest 的地方，由客户端启动闸 `boot-gate.tsx`（挂在根 layout）调用一次，幂等注册全部端口实现。
 
-### 3.6 外部 agent（ACP）与外部 MCP / OAuth 子系统
+### 3.6 旧兼容模型：外部 Agent 与 MCP/OAuth
 
 除“BYO-key → OpenAI 兼容端点”和内部 loopback MCP（§3.5）外，agent 还包含 ACP 与外部 MCP 互操作子系统。ACP 的两个方向都已接通：ideall 可作为 agent 暴露给编辑器，也可在桌面端把用户配置的外部 CLI Agent 选为对话执行后端。
 
@@ -211,7 +229,7 @@ AI 不再持专有工具，而是经一套**文件系统语义**的 MCP 工具�
 
 官方签名 stdio connector 只有在 Catalog 验证、系统凭据库 consent 和激活成功后，才按 `resources:read` / `tools:invoke` 挂载独立 `runtime-extension.<id>` 只读 FileSystem。资源 URI、分页 cursor 与工具原名留在活动 client 内，FileRef 使用 SHA-256 不透明 id；统一搜索实时读取标题、描述、类型和来源 metadata，不读取或持久索引正文。工具 schema 投影为有界 FileAction，默认高风险并绑定 tool version；调用前必须向 `app.agent-write-audit` 写 pending 脱敏意图，参数、返回正文和远端错误不进入审计。该 mount 不自动扩大 Agent 或 iframe 的授权面。
 
-## 4. 数据流
+## 4. V2 兼容数据流
 
 ```
                           ┌─────────────────────────────────────────────┐
@@ -258,15 +276,16 @@ AI 不再持专有工具，而是经一套**文件系统语义**的 MCP 工具�
 
 | 选型 | 取舍 |
 | --- | --- |
-| **Next.js 静态导出（`output: export`）** | 生产构建一律静态导出到 `out/`，无 Node 运行时、无 SSR 生产服务端。`pnpm dev` 的 SSR 仅作开发服（供 Tauri 壳加载）。 |
-| **Tauri 2.0 打包** | Rust 外壳包裹 Web 前端，单代码库覆盖 Windows/Linux/macOS 桌面 + iOS/Android 移动。`tauri-plugin-http` 让 App 内 agent 绕 CORS。 |
-| **App-only、无 SSR 生产端** | iOS/Android 与离线桌面 App 不能跑 Node 服务器，故采用静态导出 + 客户端经 ServerPort 直连后端（CORS + JWT）。代价：路由不可用 Server Actions / Route Handlers / 请求时 `headers()` / 动态路径段——动态信息一律客户端取数，动态路由改查询参数（如 `/info/entity?label=&name=`）。 |
-| **端口 + 组合根的依赖反转** | 模块互不直连，全部经 protocol 端口；新增 app/plugin 只需建 manifest 并在 boot 注册。代价：多一层间接。 |
-| **wire DTO 与领域类型分离** | openapi 生成类型仅 HTTP 适配器可见，业务/protocol 用 ServerPort 领域类型。换后端只需换适配器，业务代码零改动。 |
+| **Rust + GPUI 原生 UI** | 桌面与移动共享领域核心，但分别组合符合键鼠和触摸输入的界面。代价是两个已验证 GPUI revision 不能直接共享 UI 类型。 |
+| **SQLite WAL 本地权威存储** | 事务、全文检索和恢复能力明确；UI 必须经 application 用例访问，不能把连接泄漏到组件。 |
+| **分层 Cargo workspace** | protocol/domain/application/adapters/UI 依赖单向，换平台和测试更清晰；代价是简单操作也要经过显式边界。 |
+| **显式平台 capability** | WebView、外部程序和专业文件按平台精确降级，不用占位界面冒充支持。 |
+| **旧 V2 导出兼容层** | 保留 Next.js/Tauri 代码读取历史归档，但不进入生产构建，也不得与 GPUI App 共用数据目录。 |
 
-## 6. 关键不变量与约束
+## 6. 旧兼容层关键不变量
 
-这些不变量是产品主张的技术兑现，违反即破坏定位：
+以下规则约束 V2 wire 和 TypeScript/Tauri 兼容实现。对应 Rust 实现应在 protocol/domain/
+application 层表达相同产品语义，而不是复制旧模块边界：
 
 1. **后端可换 / 可自建**：业务代码只依赖 `ServerPort` 领域类型，绝不直连某个具体后端。`registerServerPort()` 是替换点。
 2. **本地数据不自动整库上传**：home/tool 数据以 IndexedDB 为本机权威；主动同步、发布、模型对话、外部 MCP 与 web 工具各有独立出站边界，必须遵守[数据出站矩阵](../.github/SECURITY.md#数据出站矩阵)。同步只上传密文，服务端读不到明文。
@@ -283,25 +302,28 @@ AI 不再持专有工具，而是经一套**文件系统语义**的 MCP 工具�
 
 ## 7. 部署 / 分发形态
 
-ideall 仅以 App 形态分发（Tauri 工程在 `src-tauri/`）：构建期 `next build`（`output: export` → `out/`），再由 Tauri 打包。下表是工程目标矩阵，不等同于当前自动发布范围。
+ideall 仅以原生 App 形态分发。桌面由 `ideall-desktop` 构建，移动端由
+`ideall-mobile` 的 Android/iOS 工程壳链接；`src-tauri/` 不进入生产发布。
 
-| 平台 | Tauri 目标 | 目标产物 | 当前自动化 |
-| --- | --- | --- | --- |
-| Linux | desktop | `.deb` / `.rpm` / `.AppImage` | CI 自动构建并进入 GitHub Release（x64） |
-| Windows | desktop | `.msi` / `.exe`（NSIS） | CI 自动构建并进入 GitHub Release（x64） |
-| macOS | desktop | `.dmg` / `.app` | CI 自动构建并进入 GitHub Release（arm64 / x64） |
-| Android | mobile | `.apk` / `.aab` | tag / 手动任务仅生成 debug APK workflow artifact；release 签名与商店发布未接入 |
-| iOS | mobile | `.ipa` | 需 macOS、Apple 证书与描述文件；未纳入 CI 或商店发布流程 |
+| 平台 | 原生入口 | 目标产物 |
+| --- | --- | --- |
+| Linux | `ideall-desktop` | tar.gz / DEB / RPM |
+| Windows | `ideall-desktop` | zip / MSI / NSIS setup |
+| macOS | `ideall-desktop` | `.app` zip / DMG |
+| Android | `ideall-mobile` | APK / AAB |
+| iOS | `ideall-mobile` | Simulator `.app` / archive / IPA |
 
-当前桌面发布走 GitHub Releases（含 `tauri-plugin-updater` 自动更新）；移动端仍是目标覆盖，尚无 App Store / Google Play 发布流水线。完整方案、CI、签名与路线图见 [app.md](app.md)。
+CI 验证无签名 Preview；正式产物仍需要平台签名身份、真实安装升级以及 IME/无障碍人工
+矩阵。完整流程见 [`native/RELEASE.md`](../native/RELEASE.md)。
 
 ## 8. 文档导航
 
 - [文档索引](README.md) — 全部文档按现行规范、操作手册、决策记录与历史归档分类。
 - [README.md](../README.md) — 产品定位、模块表、快速开始、连接后端、App 打包、API 类型同步。
+- [design/desktop-components.md](design/desktop-components.md) — GPUI 桌面组件边界与挂载状态。
 - [design/archive/ai-native-redesign.md](design/archive/ai-native-redesign.md) — 已落地的 AI 原生重设计历史稿：统一 Node 模型、四步折叠、墓碑、一切皆标签页 UI、`fs.*` AI 层与隐私三道闸、笔记块级合并的完整推导与雷区清单（本文 §2/§3.5/§6 已吸收落地结果）。
 - [design/archive/resource-vfs-refactor.md](design/archive/resource-vfs-refactor.md) — 已落地的 Resource/VFS 重构历史稿：ResourceRef、Provider、OpenTarget、Engine、权限隐私与迁移兼容策略。
-- [app.md](app.md) — App（桌面/移动）方案、平台矩阵、CI、签名与分阶段路线图。
+- [app.md](app.md) — 旧 Tauri App 兼容手册。
 - [scripts.md](scripts.md) — 本地验证、冒烟、API codegen、发布与脚本维护入口。
 - [development.md](development.md) — 仓库结构与开发约定（贡献者必读）。
 - [../.github/SECURITY.md](../.github/SECURITY.md) — 安全策略与漏洞报告（含同步加密关注点）。

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+use url::Url;
 
 const PROTECTED_PREFIX: &str = "⟦ideall:受保护块:";
 const MAX_EDITABLE_TEXT_BYTES: usize = 8 * 1024 * 1024;
@@ -204,7 +205,7 @@ fn render_editable_block(value: &Value) -> Option<(EditableKind, String)> {
         return Some((EditableKind::Rule, "---".into()));
     }
 
-    let text = node_text(value)?;
+    let text = render_inline_node(value)?;
     let indent = object
         .get("indent")
         .and_then(Value::as_u64)
@@ -271,6 +272,39 @@ fn node_text(value: &Value) -> Option<String> {
         text.push_str(&node_text(child)?);
     }
     Some(text)
+}
+
+fn render_inline_node(value: &Value) -> Option<String> {
+    let object = value.as_object()?;
+    if let Some(text) = object.get("text").and_then(Value::as_str) {
+        let mut rendered = text.to_owned();
+        if object.get("code").and_then(Value::as_bool) == Some(true) {
+            rendered = format!("`{rendered}`");
+        }
+        if object.get("bold").and_then(Value::as_bool) == Some(true) {
+            rendered = format!("**{rendered}**");
+        }
+        if object.get("italic").and_then(Value::as_bool) == Some(true) {
+            rendered = format!("*{rendered}*");
+        }
+        if object.get("strikethrough").and_then(Value::as_bool) == Some(true) {
+            rendered = format!("~~{rendered}~~");
+        }
+        return Some(rendered);
+    }
+
+    let children = object.get("children")?.as_array()?;
+    let rendered = children
+        .iter()
+        .map(render_inline_node)
+        .collect::<Option<Vec<_>>>()?
+        .join("");
+    if object.get("type").and_then(Value::as_str) == Some("a") {
+        let url = object.get("url").and_then(Value::as_str)?;
+        Some(format!("[{rendered}]({url})"))
+    } else {
+        Some(rendered)
+    }
 }
 
 fn protected_marker(index: usize, value: &Value) -> String {
@@ -444,7 +478,7 @@ fn build_block(block: &ParsedBlock, original: Option<&Value>) -> Value {
             object.insert("type".into(), Value::String("blockquote".into()));
             object.insert(
                 "children".into(),
-                json!([{"type": "p", "children": [{"text": block.text}]}]),
+                json!([{"type": "p", "children": parse_inline_children(&block.text)}]),
             );
         }
         EditableKind::Rule => {
@@ -482,7 +516,138 @@ fn build_block(block: &ParsedBlock, original: Option<&Value>) -> Value {
 
 fn set_text_block(object: &mut Map<String, Value>, block_type: &str, text: &str) {
     object.insert("type".into(), Value::String(block_type.into()));
-    object.insert("children".into(), json!([{"text": text}]));
+    object.insert("children".into(), Value::Array(parse_inline_children(text)));
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct InlineMarks {
+    bold: bool,
+    italic: bool,
+    strikethrough: bool,
+    code: bool,
+}
+
+fn parse_inline_children(text: &str) -> Vec<Value> {
+    let mut children = Vec::new();
+    parse_inline_into(text, InlineMarks::default(), &mut children);
+    if children.is_empty() {
+        children.push(json!({"text": ""}));
+    }
+    children
+}
+
+fn parse_inline_into(text: &str, marks: InlineMarks, children: &mut Vec<Value>) {
+    let mut offset = 0;
+    while offset < text.len() {
+        let remaining = &text[offset..];
+        if let Some((consumed, label, url)) = parse_link(remaining) {
+            let mut link_children = Vec::new();
+            parse_inline_into(label, marks, &mut link_children);
+            if link_children.is_empty() {
+                link_children.push(text_leaf("", marks));
+            }
+            children.push(json!({
+                "type": "a",
+                "url": url,
+                "children": link_children,
+            }));
+            offset += consumed;
+            continue;
+        }
+
+        let delimiter = if remaining.starts_with("***") {
+            Some((
+                "***",
+                InlineMarks {
+                    bold: true,
+                    italic: true,
+                    ..marks
+                },
+            ))
+        } else if remaining.starts_with("**") {
+            Some((
+                "**",
+                InlineMarks {
+                    bold: true,
+                    ..marks
+                },
+            ))
+        } else if remaining.starts_with("~~") {
+            Some((
+                "~~",
+                InlineMarks {
+                    strikethrough: true,
+                    ..marks
+                },
+            ))
+        } else if remaining.starts_with('`') {
+            Some((
+                "`",
+                InlineMarks {
+                    code: true,
+                    ..marks
+                },
+            ))
+        } else if remaining.starts_with('*') {
+            Some((
+                "*",
+                InlineMarks {
+                    italic: true,
+                    ..marks
+                },
+            ))
+        } else {
+            None
+        };
+        if let Some((delimiter, nested_marks)) = delimiter {
+            let inner = &remaining[delimiter.len()..];
+            if let Some(end) = inner.find(delimiter) {
+                parse_inline_into(&inner[..end], nested_marks, children);
+                offset += delimiter.len() + end + delimiter.len();
+                continue;
+            }
+        }
+
+        let next = remaining
+            .char_indices()
+            .skip(1)
+            .find(|(_, character)| matches!(character, '*' | '~' | '`' | '['))
+            .map_or(remaining.len(), |(index, _)| index);
+        let consumed = next.max(remaining.chars().next().map_or(0, char::len_utf8));
+        children.push(text_leaf(&remaining[..consumed], marks));
+        offset += consumed;
+    }
+}
+
+fn parse_link(value: &str) -> Option<(usize, &str, &str)> {
+    let label_end = value.strip_prefix('[')?.find("](")?;
+    let label = &value[1..1 + label_end];
+    let url_start = 1 + label_end + 2;
+    let url_end = value[url_start..].find(')')? + url_start;
+    let url = &value[url_start..url_end];
+    let parsed = Url::parse(url).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+    Some((url_end + 1, label, url))
+}
+
+fn text_leaf(text: &str, marks: InlineMarks) -> Value {
+    let mut leaf = Map::new();
+    leaf.insert("text".into(), Value::String(text.into()));
+    if marks.bold {
+        leaf.insert("bold".into(), Value::Bool(true));
+    }
+    if marks.italic {
+        leaf.insert("italic".into(), Value::Bool(true));
+    }
+    if marks.strikethrough {
+        leaf.insert("strikethrough".into(), Value::Bool(true));
+    }
+    if marks.code {
+        leaf.insert("code".into(), Value::Bool(true));
+    }
+    Value::Object(leaf)
 }
 
 fn set_list_block(
@@ -516,7 +681,7 @@ mod tests {
             "custom": {"kept": true}
         })];
         let projection = project_note(&content);
-        assert_eq!(projection.text, "# Rich heading");
+        assert_eq!(projection.text, "# **Rich*** heading*");
         assert_eq!(
             apply_note_text(&content, &projection.text).unwrap(),
             content
@@ -576,5 +741,34 @@ mod tests {
         assert_eq!(result[3]["type"], "blockquote");
         assert_eq!(result[4]["type"], "hr");
         assert_eq!(result[5]["lang"], "rust");
+    }
+
+    #[test]
+    fn inline_markdown_round_trips_as_plate_marks_and_safe_links() {
+        let text = "A **bold** *italic* ***both*** ~~gone~~ `code` [site](https://example.com)";
+        let result = apply_note_text(&[], text).unwrap();
+        let children = result[0]["children"].as_array().unwrap();
+
+        assert!(children.iter().any(|child| child["bold"] == true));
+        assert!(children.iter().any(|child| child["italic"] == true));
+        assert!(
+            children
+                .iter()
+                .any(|child| child["bold"] == true && child["italic"] == true)
+        );
+        assert!(children.iter().any(|child| child["strikethrough"] == true));
+        assert!(children.iter().any(|child| child["code"] == true));
+        assert!(children.iter().any(|child| {
+            child["type"] == "a"
+                && child["url"] == "https://example.com"
+                && child["children"][0]["text"] == "site"
+        }));
+        assert_eq!(project_note(&result).text, text);
+
+        let unsafe_link = apply_note_text(&[], "[bad](javascript:alert(1))").unwrap();
+        assert_eq!(
+            unsafe_link[0]["children"][0]["text"],
+            "[bad](javascript:alert(1))"
+        );
     }
 }

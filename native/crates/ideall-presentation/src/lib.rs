@@ -32,44 +32,85 @@ pub mod color {
     pub const DANGER_BORDER: u32 = 0xe3c1b6;
     pub const DISABLED: u32 = 0xaab4c2;
     pub const MESSAGE_TOOL: u32 = 0xf0f2ef;
+
+    /// Desktop-only light palette for the compact JetBrains-inspired workbench.
+    pub mod desktop {
+        pub const CANVAS: u32 = 0xf7f8fa;
+        pub const SURFACE: u32 = 0xffffff;
+        pub const SURFACE_MUTED: u32 = 0xf2f3f5;
+        pub const SURFACE_RAISED: u32 = 0xffffff;
+        pub const INK: u32 = 0x1f2329;
+        pub const INK_MUTED: u32 = 0x5e636d;
+        pub const INK_FAINT: u32 = 0x8a8f98;
+        pub const BORDER: u32 = 0xdfe1e5;
+        pub const BORDER_STRONG: u32 = 0xc9ccd2;
+        pub const ACCENT: u32 = 0x3574f0;
+        pub const ACCENT_SOFT: u32 = 0xe7efff;
+        pub const RAIL: u32 = 0xf2f3f5;
+        pub const RAIL_MUTED: u32 = 0x6c7078;
+        pub const RAIL_ACTIVE: u32 = 0xdde7f8;
+        pub const RAIL_INK: u32 = 0x1f2329;
+        pub const DANGER: u32 = 0xc75450;
+        pub const DANGER_BORDER: u32 = 0xe2b7b5;
+        pub const WARNING_SOFT: u32 = 0xfff3d6;
+        pub const MESSAGE_TOOL: u32 = 0xf0f1f3;
+        pub const TOOLBAR: u32 = 0xf2f3f5;
+        pub const EDITOR: u32 = 0xffffff;
+        pub const EDITOR_GUTTER: u32 = 0xf7f8fa;
+        pub const HOVER: u32 = 0xe9eaed;
+        pub const SELECTION: u32 = 0xdce7f8;
+        pub const STATUS_BAR: u32 = 0xf2f3f5;
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NavigationItem {
     pub section: &'static str,
+    pub label: &'static str,
     pub icon: &'static str,
+    pub shortcut: &'static str,
 }
 
 pub const NAVIGATION: [NavigationItem; 5] = [
     NavigationItem {
         section: "我的",
-        icon: "⌂",
+        label: "项目",
+        icon: "▤",
+        shortcut: "Alt 1",
     },
     NavigationItem {
         section: "活动",
+        label: "最近",
         icon: "◷",
+        shortcut: "",
     },
     NavigationItem {
         section: "浏览",
-        icon: "◇",
+        label: "浏览",
+        icon: "◈",
+        shortcut: "",
     },
     NavigationItem {
         section: "应用",
+        label: "Agent",
         icon: "✦",
+        shortcut: "",
     },
     NavigationItem {
         section: "设置",
+        label: "设置",
         icon: "⚙",
+        shortcut: "",
     },
 ];
 
 pub fn section_eyebrow(section: &str) -> &'static str {
     match section {
-        "我的" => "LOCAL LIBRARY",
-        "活动" => "LOCAL ACTIVITY",
+        "我的" => "PROJECT",
+        "活动" => "RECENT FILES",
         "浏览" => "DISCOVER",
-        "应用" => "NATIVE CAPABILITIES",
-        "设置" => "SYSTEM",
+        "应用" => "AGENT TOOLS",
+        "设置" => "SETTINGS",
         "搜索" => "SEARCH",
         "回收站" => "TRASH",
         _ => "IDEALL",
@@ -78,11 +119,11 @@ pub fn section_eyebrow(section: &str) -> &'static str {
 
 pub fn section_description(section: &str) -> &'static str {
     match section {
-        "我的" => "笔记、文件与收藏都在设备上",
-        "活动" => "回到最近处理过的信息",
-        "浏览" => "连接网页、发布者与外部世界",
-        "应用" => "让 Agent 和 Engine 在授权边界内工作",
-        "设置" => "管理同步、安全与原生应用",
+        "我的" => "浏览本地项目、笔记与文件",
+        "活动" => "最近修改的本地内容",
+        "浏览" => "书签、关注源与网页",
+        "应用" => "模型、ACP 与原生 Engine",
+        "设置" => "同步、安全与应用更新",
         "搜索" => "跨标题与正文查找本地内容",
         "回收站" => "恢复或永久移除本地内容",
         _ => "本地优先个人信息终端",
@@ -138,6 +179,7 @@ mod tests {
         assert_eq!(sections.len(), NAVIGATION.len());
         for item in NAVIGATION {
             assert!(!item.icon.is_empty());
+            assert!(!item.label.is_empty());
             assert_ne!(section_eyebrow(item.section), "IDEALL");
             assert_ne!(section_description(item.section), "本地优先个人信息终端");
         }

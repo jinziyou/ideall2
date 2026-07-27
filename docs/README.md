@@ -14,6 +14,8 @@
 | [runtime-extension-packages.md](runtime-extension-packages.md) | 联网签名目录、桌面扩展包格式、Minisign 验证、connector 生命周期与残余风险 |
 | [development.md](development.md) | 目录结构、依赖边界、开发命令与贡献约定 |
 | [design/ui-style.md](design/ui-style.md) | UI 视觉和组件规范 |
+| [design/desktop-components.md](design/desktop-components.md) | GPUI 桌面 Editor/Explorer/Browser/Shell 边界与挂载状态 |
+| [design/desktop-editor.md](design/desktop-editor.md) | 桌面 Notion 式块编辑、斜杠命令、快捷键与数据安全不变量 |
 | [../.github/SECURITY.md](../.github/SECURITY.md) | 安全策略与漏洞报告方式 |
 
 ## 操作手册

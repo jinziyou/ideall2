@@ -71,6 +71,10 @@ pub enum ApplicationError {
     InvalidFileRef(String),
     #[error("file is larger than the {limit} byte import limit ({actual} bytes)")]
     FileTooLarge { actual: u64, limit: u64 },
+    #[error("node title must contain 1 to 1024 bytes")]
+    InvalidNodeTitle,
+    #[error("node cannot be moved into itself or one of its descendants")]
+    InvalidNodeMove,
     #[error("local file operation failed: {0}")]
     Io(#[from] std::io::Error),
     #[error("binary file `{0}` is read-only in the text editor")]
@@ -555,7 +559,41 @@ impl LocalWorkspace {
 
     pub fn rename(&mut self, id: &str, title: impl Into<String>) -> Result<Node, ApplicationError> {
         let mut node = self.node(id)?;
-        node.base_mut().title = title.into();
+        let title = validated_node_title(title.into())?;
+        node.base_mut().title = title;
+        node.base_mut().updated_at = now_millis()?;
+        self.database.put_node(&node)?;
+        Ok(node)
+    }
+
+    pub fn move_node(
+        &mut self,
+        id: &str,
+        parent_id: Option<&str>,
+    ) -> Result<Node, ApplicationError> {
+        if id == HOME_ROOT_ID || parent_id == Some(id) {
+            return Err(ApplicationError::InvalidNodeMove);
+        }
+        if let Some(parent_id) = parent_id {
+            let parent = self.node(parent_id)?;
+            if parent.kind() != NodeKind::Folder {
+                return Err(ApplicationError::WrongKind {
+                    id: parent_id.into(),
+                    actual: parent.kind(),
+                    expected: NodeKind::Folder,
+                });
+            }
+            let mut ancestor = parent.base().parent_id.clone();
+            while let Some(ancestor_id) = ancestor {
+                if ancestor_id == id {
+                    return Err(ApplicationError::InvalidNodeMove);
+                }
+                let node = self.node(&ancestor_id)?;
+                ancestor = node.base().parent_id.clone();
+            }
+        }
+        let mut node = self.node(id)?;
+        node.base_mut().parent_id = Some(parent_id.unwrap_or(HOME_ROOT_ID).to_owned());
         node.base_mut().updated_at = now_millis()?;
         self.database.put_node(&node)?;
         Ok(node)
@@ -568,6 +606,7 @@ impl LocalWorkspace {
         body: Option<&str>,
     ) -> Result<Node, ApplicationError> {
         let mut node = self.node(id)?;
+        let title = validated_node_title(title.into())?;
         let mut replacement_blob = None;
         let timestamp = now_millis()?;
         match &mut node {
@@ -597,7 +636,7 @@ impl LocalWorkspace {
             }
             Node::Folder { .. } | Node::Feed { .. } | Node::Thread { .. } => {}
         }
-        node.base_mut().title = title.into();
+        node.base_mut().title = title;
         node.base_mut().updated_at = timestamp;
         if let Some(blob) = replacement_blob {
             self.database.put_file(&node, &blob)?;
@@ -1932,13 +1971,20 @@ fn new_base(parent_id: Option<&str>, title: String) -> Result<BaseNode, Applicat
         id: id.clone(),
         parent_id: Some(parent_id.unwrap_or(HOME_ROOT_ID).to_owned()),
         sort_key: format!("{timestamp:020}-{id}"),
-        title,
+        title: validated_node_title(title)?,
         tags: Vec::new(),
         created_at: timestamp,
         updated_at: timestamp,
         deleted_at: None,
         meta: BTreeMap::new(),
     })
+}
+
+fn validated_node_title(title: String) -> Result<String, ApplicationError> {
+    if title.trim().is_empty() || title.len() > 1024 {
+        return Err(ApplicationError::InvalidNodeTitle);
+    }
+    Ok(title)
 }
 
 fn validated_bookmark_url(url: &str) -> Result<Url, ApplicationError> {
@@ -2530,7 +2576,7 @@ mod tests {
             "children": [{"text": "Heading", "bold": true}]
         })];
         let document = read_plain_note("note-rich", &content);
-        assert_eq!(document.text, "# Heading");
+        assert_eq!(document.text, "# **Heading**");
         assert!(document.editable);
         assert_eq!(document.protected_blocks, 0);
     }
@@ -2569,7 +2615,7 @@ mod tests {
 
         let projection = workspace.plain_note(&id).unwrap();
         assert_eq!(projection.protected_blocks, 1);
-        let edited = projection.text.replacen("# Old", "# New", 1);
+        let edited = projection.text.replacen("Old", "New", 1);
         workspace.save_edits(&id, "rich", Some(&edited)).unwrap();
 
         let saved = workspace.node(&id).unwrap();
@@ -2577,6 +2623,7 @@ mod tests {
             unreachable!();
         };
         assert_eq!(content[0]["children"][0]["text"], "New");
+        assert_eq!(content[0]["children"][0]["bold"], true);
         assert_eq!(content[1]["type"], "future-card");
         assert_eq!(content[1]["payload"], json!({"opaque": [1, 2, 3]}));
         assert_eq!(content[2]["children"][0]["text"], "Body");
@@ -2663,6 +2710,67 @@ mod tests {
     }
 
     #[test]
+    fn rename_validates_title_before_persisting() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        let note = workspace.create_note(None, "before").unwrap();
+        let id = note.base().id.clone();
+
+        assert!(matches!(
+            workspace.rename(&id, "   "),
+            Err(ApplicationError::InvalidNodeTitle)
+        ));
+        assert!(matches!(
+            workspace.save_edits(&id, "", Some("must not persist")),
+            Err(ApplicationError::InvalidNodeTitle)
+        ));
+        assert_eq!(workspace.node(&id).unwrap().base().title, "before");
+        assert_eq!(workspace.plain_note(&id).unwrap().text, "");
+
+        workspace.rename(&id, "after.md").unwrap();
+        assert_eq!(workspace.node(&id).unwrap().base().title, "after.md");
+    }
+
+    #[test]
+    fn move_node_changes_parent_and_rejects_cycles_or_file_parents() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        let source = workspace.create_folder(None, "source").unwrap();
+        let nested = workspace
+            .create_folder(Some(&source.base().id), "nested")
+            .unwrap();
+        let target = workspace.create_folder(None, "target").unwrap();
+        let note = workspace
+            .create_note(Some(&source.base().id), "note")
+            .unwrap();
+
+        workspace
+            .move_node(&note.base().id, Some(&target.base().id))
+            .unwrap();
+        assert_eq!(
+            workspace.node(&note.base().id).unwrap().base().parent_id,
+            Some(target.base().id.clone())
+        );
+        assert!(matches!(
+            workspace.move_node(&source.base().id, Some(&nested.base().id)),
+            Err(ApplicationError::InvalidNodeMove)
+        ));
+        assert!(matches!(
+            workspace.move_node(&target.base().id, Some(&note.base().id)),
+            Err(ApplicationError::WrongKind { .. })
+        ));
+
+        workspace.move_node(&note.base().id, None).unwrap();
+        assert_eq!(
+            workspace
+                .node(&note.base().id)
+                .unwrap()
+                .base()
+                .parent_id
+                .as_deref(),
+            Some(HOME_ROOT_ID)
+        );
+    }
+
+    #[test]
     fn protects_nonempty_folders_from_trash() {
         let mut workspace = LocalWorkspace::open_in_memory().unwrap();
         let folder = workspace.create_folder(None, "folder").unwrap();
@@ -2713,6 +2821,11 @@ mod tests {
             root_id: Some(HOME_ROOT_ID.into()),
             navigation_path: Some("/home/n1".into()),
         });
+        state.explorer = ideall_domain::ExplorerLayoutState {
+            width: 344,
+            expanded_folders: vec!["folder-b".into(), "folder-a".into()],
+            visible: false,
+        };
 
         workspace.save_workspace_state(&state).unwrap();
         assert_eq!(workspace.load_workspace_state().unwrap(), state);

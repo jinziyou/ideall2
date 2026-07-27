@@ -1,21 +1,51 @@
 # ideall 开发约定
 
-> **原生切换说明（2026-07-27）**：生产开发入口已经迁到 `native/` Rust + GPUI
-> workspace，根命令见 [README](../README.md) 与
-> [`native/README.md`](../native/README.md)。本文的 `src/`、Next.js 与 Tauri 章节只约束
-> V2 归档导出兼容层，不再描述生产 App。
+> **当前口径（2026-07-27）**：生产开发入口是 `native/` Rust + GPUI workspace。
+> `src/`、`src-tauri/`、Next.js 与 Tauri 章节仅约束 V2 归档导出兼容层。
 
 ## Repository
 
-ideall 是**独立项目 / 独立仓库**（`git@github.com:jinziyou/ideall.git`）的 **Next.js 客户端应用**，本仓库为源码权威仓库。
-整体定位见 [README.md](../README.md)；架构权威说明见 [architecture.md](architecture.md)；API 契约同步见下方“API codegen”。
-ideall 是后端数据服务的**外部消费方 / 客户端**：经 `ServerPort` 契约消费 wonita 服务的数据服务 API（wonita 服务是 `ServerPort` 的参考实现；第三方 / 嵌入式 / 局域网节点亦可实现 `ServerPort`）。信息采集 / NLP / 知识图谱 / 鉴权由该后端数据服务提供，ideall 经 `NEXT_PUBLIC_SERVER_ADDR` 连接，不在本仓库范围内；ideall 不被单一后端绑死。
+ideall 是独立的本地优先 Rust App。桌面使用 GPUI + gpui-component，移动端使用 GPUI +
+gpui-mobile；protocol、domain、application、storage、sync、agent 等核心 crate 在五个平台共享。
+wonita 只是默认联网服务实现，本地核心不依赖它。
 
-ideall **仅以 App 形态分发**（Tauri 跨平台静态导出，无 Node 运行时 / 无 SSR 生产部署）。Windows / Linux / macOS 桌面包由 CI 自动构建并进入 GitHub Release；Android 目前只有 tag / 手动任务的 debug APK 工件，iOS 未纳入 CI。
+生产依赖方向固定为：
 
-**分支模型（dev / main）**：`main` 稳定/发布（App 版本 tag 基于它），`dev` 集成/日常开发；改动先进 `dev`，CI 在 `main` / `dev` / PR 均运行，稳定后合并 `main` 发布。
+```text
+protocol → domain → application → adapters → UI → platform app
+```
 
-## Positioning
+共享 crate 的公开 API 不得暴露 GPUI 类型；桌面与移动端使用各自验证过的 GPUI revision。
+仓库结构、平台依赖和打包入口见 [`native/README.md`](../native/README.md)，桌面组件边界见
+[desktop-components.md](design/desktop-components.md)。
+
+**分支模型（dev / main）**：`dev` 用于集成和日常开发，`main` 用于稳定发布。
+
+## 原生代码组织
+
+```text
+native/
+├── apps/
+│   ├── ideall-desktop/       # GPUI 桌面组合根和桌面组件
+│   ├── ideall-mobile/        # iOS/Android 壳
+│   └── ideall-cli/           # doctor、归档、同步与探测工具
+└── crates/
+    ├── ideall-protocol/      # 纯契约
+    ├── ideall-domain/        # Engine/Workspace 规则
+    ├── ideall-application/   # 跨 UI 用例
+    ├── ideall-presentation/  # 无 GPUI 类型的导航、文案和 Token
+    └── ...                   # storage/sync/agent/acp/secrets/updater
+
+src/ + src-tauri/              # 旧版 V2 归档导出兼容层
+```
+
+Rust 代码使用 edition 2024。运行 `cargo fmt`；Clippy 警告视为错误。修改 protocol、store、
+同步、安全守卫、provider 或部署脚本时必须补充聚焦测试。
+
+## 旧兼容层：定位与数据纪律
+
+> 以下内容解释旧 TypeScript/Tauri 数据模型和 V2 wire，便于维护迁移兼容性；不得据此新增
+> 生产 App 功能。
 
 ideall 是**开源、本地优先的个人信息终端**（独立项目）：从个人视角出发，把分散的他人、信息、资源和工具聚合到一处。
 **设计思想**：一切皆文件、一切皆标签页——各类 Storage 经 FileSystem 挂载到统一命名空间，以 `FileRef` 寻址；打开任意文件即由 Engine 渲染为工作区标签页。`ideall.core` 的笔记、书签、资源、关注和对话收敛为 Node 库；音频、数据库、Agent 配置和第三方 App 等来源保留各自存储语义。
@@ -66,7 +96,7 @@ Settings section 与 Agent config 的文件版本分别固定为 `settings-v2:<s
 **社区是用户 / peer 发布层（账号）**：登录后发布内容成为社区发布者，他人可关注其发布并汇入关注流。
 **账号与同步码职责分离**：账号决定谁能访问密文，同步码决定谁能解密；跨设备需同时使用同一账号和同一同步码。
 
-## 架构：终端分层（src/ 下）
+## 旧兼容层：终端分层（`src/`）
 
 > 本节是日常开发速查；完整架构（领域模型 / 数据流图 / 不变量）见 [architecture.md](architecture.md)。
 
@@ -109,57 +139,55 @@ ESLint 强制五条边界：
   `registerServerPort()` 覆盖。这是 ideall 作为外部消费方、不被单一后端绑死的支点。
 - 启动注册由 `@/shell/boot-gate.tsx`（客户端启动闸，挂在根 layout）调用 `boot.ts#registerAll()` 完成（组合根，import 各模块 manifest）。
 
-## Common commands
+## 命令速查
 
-> 环境：Node ≥ 22、pnpm 9；Tauri 另需 Rust ≥ 1.77.2 与平台系统库 —— 见 [README.md#开发环境](../README.md#开发环境)。
+> 生产构建需要 Rust 1.96。只有维护旧兼容层和仓库脚本时才需要 Node.js ≥ 22 与 pnpm 9。
 
 ```bash
-pnpm install
-pnpm dev          # 浏览器开发服（SSR）http://localhost:5020
-pnpm build        # 生成本地语义 Worker/runtime，再执行 Next 静态导出 → out/
-pnpm semantic:bundle # 生成 public/generated 下的按需编排器、Worker 与本地 ONNX WASM runtime
-pnpm verify:semantic-runtime # 校验语义 Worker raw/gzip 与 WASM runtime 预算
-pnpm clean:next   # 清理 .next/，verify:base 会在 typecheck 前自动执行
-pnpm lint         # 含 protocol 纯度强制（no-restricted-imports）
-pnpm lint:deps    # 检查未使用、未声明与多余依赖
-pnpm lint:dead-code # 检查未被产品、测试、Worker 或 fixture 入口引用的孤立文件
-pnpm lint:docs    # 检查仓库内文档链接与 docs/README.md 收录完整性
-pnpm version:check # 校验 package/Tauri/Cargo/Cargo.lock 版本一致
-pnpm test         # tsx + node:test（经 scripts/run-tests.mjs；可加子串过滤，如 pnpm test sort-key）
-pnpm test:coverage # 为选定核心源码生成 c8 text/lcov，并检查仓库覆盖率基线
-pnpm test:scripts # 维护脚本的 node:test 测试
+# GPUI 桌面
+pnpm app:dev
+pnpm app:build
 
-# App（Tauri 跨平台桌面/移动；工程在 src-tauri/，见 docs/app.md）
-pnpm app:dev      # 复用或启动 Next 开发服，再启动桌面开发壳
-pnpm app:export   # build → 关键静态入口检查 → bundle 预算（生产导出统一入口）
-pnpm app:build    # 为当前宿主平台打包（跨平台矩阵由 CI 在各平台构建）
+# 原生质量门禁
+pnpm native:check
+pnpm native:test
+pnpm native:lint
 
-# 本地基础门禁（对应 CI 基础检查；会先清理 .next 再 typecheck）
-pnpm verify:checks # 不含生产构建的质量门禁，包含依赖与孤立文件检查
-pnpm verify:base   # verify:checks → app:export
-pnpm verify:bundle # 检查已有 out/ 的 JavaScript raw/gzip bundle 预算
-pnpm verify:static-export # 检查 out/ 静态导出关键入口与 _next chunks
-pnpm verify:smoke:static  # 生产形态浏览器冒烟：app:export → serve out/ → notes/files/plugins/trash
-pnpm verify:full          # verify:base + 开发服冒烟（自动挑 5020-5023 可用端口）
+# 移动产物
+pnpm native:android
+pnpm native:android:bundle
+pnpm native:ios:simulator
+pnpm native:ios:device
 
-# API codegen（后端数据服务的 schema 变更后）——产物是 wire DTO，仅供 HTTP 适配器消费
-pnpm gen:api      # openapi/server.json → src/lib/api/server.d.ts（离线，普通贡献者只需这一步）
-pnpm gen:api:check  # CI 卡点
-# 维护者刷新契约源（拿到后端新导出的 openapi.json 时）：
+# 全仓库门禁
+pnpm verify
+pnpm lint:docs
+pnpm version:check
+
+# 旧 V2 导出兼容层
+pnpm legacy:web:export
+pnpm typecheck
+pnpm test
+
+# API schema
+pnpm gen:api
+pnpm gen:api:check
 SERVER_LOCAL=/abs/path/to/openapi.json pnpm sync:api
 ```
 
 脚本入口、参数与新增脚本约定见 [scripts.md](scripts.md)。
 
-## 形态：App-only（Tauri 跨平台）
+## 旧兼容层：Tauri 静态导出形态
 
-ideall 仅以 App 形态分发（当前流程见 [app.md](app.md)，历史迁移见 [app-history.md](app-history.md)）：
+以下是旧版 Tauri 壳的兼容约束，只用于归档导出与 wire 回归；生产流程见
+[`native/README.md`](../native/README.md)，历史迁移见 [app-history.md](app-history.md)：
 
-- **构建目标**：`output: export` 静态导出（默认且唯一生产构建），Tauri 2.0（`src-tauri/`）以 **Windows / Linux / macOS / Android / iOS** 为目标。当前自动发布只覆盖桌面；Android 仅有 CI debug APK，iOS 未入 CI。无 Node 运行时 / 无 SSR 生产部署，数据层走**客户端直连后端**（`NEXT_PUBLIC_SERVER_ADDR`）；数据访问已同构客户端化。
-- **开发**：`pnpm dev` 仍是本地 SSR 开发服（`pnpm app:dev` 会复用或启动它），不影响导出。
-- `lib/env.ts` 的 `SERVER_ADDR` 同构：App 客户端 / 浏览器直连 `NEXT_PUBLIC_SERVER_ADDR`；`pnpm dev` 的 SSR 渲染期服务端读取 `SERVER_ADDR`。客户端直连需后端放行 CORS（App 内 agent 经 `tauri-plugin-http` 绕过）。
+- **构建目标**：`pnpm legacy:web:export` 生成 `out/`，不产生生产 App。
+- **开发**：需要排查旧界面时使用 `pnpm web:dev`；根 `pnpm dev` 已启动 GPUI 桌面端。
+- `lib/env.ts` 的 `SERVER_ADDR` 同构：旧客户端 / 浏览器直连 `NEXT_PUBLIC_SERVER_ADDR`；
+  `pnpm web:dev` 的 SSR 渲染期读取 `SERVER_ADDR`。
 
-## Conventions
+## 旧兼容层：TypeScript 约定
 
 - 默认使用 Server Component，仅交互组件添加 `"use client"`。
 - UI 复用 `src/ui` 的 shadcn 原语，禁止引入并行 UI 库；视觉决策（阴影 / 颜色 / 圆角 / 间距 / 公共组件）以 [docs/design/ui-style.md](design/ui-style.md) 为准。

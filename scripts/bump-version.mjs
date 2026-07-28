@@ -40,7 +40,7 @@ try {
     console.log(`✓ ${update.path}: ${currentVersion} → ${nextVersion}`)
   }
   console.log(
-    `\n版本已统一为 ${nextVersion} —— 检查 diff 后提交, 再打 tag: git tag app-v${nextVersion}`,
+    `\n版本已统一为 ${nextVersion} —— 检查 diff 并提交后，再运行 native-release workflow。`,
   )
 } catch (error) {
   console.error(`✗ ${error instanceof Error ? error.message : error}`)

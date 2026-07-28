@@ -4269,7 +4269,6 @@ dependencies = [
  "ideall-sync-http",
  "ideall-updater",
  "lb-wry",
- "shell-words",
  "url",
  "x11rb",
 ]

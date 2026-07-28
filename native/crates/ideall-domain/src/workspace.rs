@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "lowercase")]
 pub enum WorkspaceKind {
     #[default]
+    #[serde(alias = "development")]
     Files,
     Audio,
-    Development,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -73,6 +73,29 @@ const fn default_true() -> bool {
 }
 
 impl WorkspaceState {
+    pub fn migrate_retired_engines(&mut self) {
+        let active_tab = self
+            .active_id
+            .as_deref()
+            .and_then(|active_id| {
+                self.tabs
+                    .iter()
+                    .find(|tab| tab_key(tab) == active_id)
+                    .cloned()
+            })
+            .map(migrate_tab);
+
+        for tab in &mut self.tabs {
+            migrate_tab_in_place(tab);
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        self.tabs.retain(|tab| seen.insert(tab_key(tab)));
+        self.active_id = active_tab
+            .as_ref()
+            .map(tab_key)
+            .filter(|active_id| self.tabs.iter().any(|tab| tab_key(tab) == *active_id));
+    }
+
     pub fn open(&mut self, descriptor: TabDescriptor) -> &str {
         let id = tab_key(&descriptor);
         if let Some(existing) = self
@@ -139,6 +162,20 @@ impl WorkspaceState {
     }
 }
 
+fn migrate_tab(mut tab: TabDescriptor) -> TabDescriptor {
+    migrate_tab_in_place(&mut tab);
+    tab
+}
+
+fn migrate_tab_in_place(tab: &mut TabDescriptor) {
+    tab.engine_id = match tab.engine_id.as_str() {
+        "ideall.code" => "ideall.text",
+        "ideall.database" | "ideall.git" | "ideall.shell" => "ideall.preview",
+        _ => return,
+    }
+    .into();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,7 +195,7 @@ mod tests {
         let mut workspace = WorkspaceState::default();
         let first = workspace.open(tab("n1", "preview", "Old")).to_owned();
         let second = workspace.open(tab("n1", "preview", "New")).to_owned();
-        let third = workspace.open(tab("n1", "code", "Code")).to_owned();
+        let third = workspace.open(tab("n1", "text", "Text")).to_owned();
 
         assert_eq!(first, second);
         assert_ne!(second, third);
@@ -211,5 +248,28 @@ mod tests {
         assert_eq!(state.explorer, ExplorerLayoutState::default());
         assert_eq!(state.explorer.width, 272);
         assert!(state.explorer.visible);
+    }
+
+    #[test]
+    fn retired_workspace_engines_migrate_without_duplicate_tabs() {
+        let mut state = WorkspaceState::default();
+        let active_id = state.open(tab("n1", "ideall.code", "Legacy")).to_owned();
+        state.tabs.push(tab("n1", "ideall.text", "Current"));
+        state.tabs.push(tab("n2", "ideall.database", "Data"));
+        state.active_id = Some(active_id);
+
+        state.migrate_retired_engines();
+
+        assert_eq!(state.tabs.len(), 2);
+        assert_eq!(state.tabs[0].engine_id, "ideall.text");
+        assert_eq!(state.tabs[1].engine_id, "ideall.preview");
+        assert_eq!(state.active_id, Some(tab_key(&state.tabs[0])));
+    }
+
+    #[test]
+    fn legacy_development_workspace_deserializes_as_files() {
+        let state: WorkspaceState =
+            serde_json::from_str(r#"{"kind":"development","tabs":[],"activeId":null}"#).unwrap();
+        assert_eq!(state.kind, WorkspaceKind::Files);
     }
 }

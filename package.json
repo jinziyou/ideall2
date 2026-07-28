@@ -13,8 +13,6 @@
     "build": "pnpm native:build:desktop",
     "app:dev": "pnpm native:dev",
     "app:build": "pnpm native:build:desktop",
-    "git:pull": "node scripts/git-pull.mjs",
-    "git:setup": "node scripts/git-setup.mjs",
     "lint:actions": "node scripts/lint-actions.mjs",
     "lint:docs": "node scripts/check-docs.mjs",
     "native:check": "cd native && cargo check --locked --workspace --all-targets && cargo check --locked -p ideall-mobile --features mobile-ui-host-check",
@@ -28,16 +26,14 @@
     "native:ios:device": "bash native/apps/ideall-mobile/build-mobile.sh ios-device release",
     "native:ios:archive": "bash native/apps/ideall-mobile/build-mobile.sh ios-archive release",
     "native:ios:ipa": "bash native/apps/ideall-mobile/build-mobile.sh ios-ipa release",
-    "verify": "pnpm verify:base",
+    "verify": "pnpm verify:checks && pnpm native:lint && pnpm native:test",
     "verify:checks": "pnpm format:check && pnpm lint:actions && pnpm lint:docs && pnpm version:check && pnpm test:scripts",
-    "verify:base": "pnpm verify:checks && pnpm native:lint && pnpm native:test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test:scripts": "node scripts/run-script-tests.mjs",
     "bump": "node scripts/bump-version.mjs",
     "version:check": "node scripts/check-version.mjs"
   },
-  "dependencies": {},
   "devDependencies": {
     "actionlint": "2.0.6",
     "prettier": "^3.9.5"

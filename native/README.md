@@ -16,7 +16,7 @@ cargo run --locked -p ideall-cli -- archive import /path/to/workspace.json --dat
 cargo run --locked -p ideall-cli -- acp-probe --program node --arg /absolute/path/to/acp-agent.mjs --cwd /absolute/workspace --prompt "hello"
 # key 只从 IDEALL_MODEL_API_KEY 读取
 cargo run --locked -p ideall-cli -- model-probe --base-url https://model.example/v1 --model staging-model --prompt "hello"
-# code/token 只从 IDEALL_SYNC_CODE / IDEALL_SYNC_BEARER_TOKEN 读取
+# 同步码/token 只从 IDEALL_SYNC_CODE / IDEALL_SYNC_BEARER_TOKEN 读取
 cargo run --locked -p ideall-cli -- sync-probe --database /tmp/ideall-smoke.db --server https://sync.example --seed-title ideall-smoke
 bash scripts/verify-gpui-mobile-vendor.sh
 # 联网拉取固定 revision，并确认 vendor 仅包含登记过的差异
@@ -69,8 +69,8 @@ archive、签名/公证 DMG 与 Authenticode MSI/NSIS 安装器；
 频道；更换 URL 不能绕过签名验证。受保护 release 构建会把所选频道编译为默认值，因此
 Stable 二进制不会回看 Preview；运行期环境变量仅用于受控诊断。原生端不做静默自替换。
 
-- `ideall-desktop`：GPUI + gpui-component 桌面壳；Editor、Explorer、Browser 与 Shell
-  的状态边界和挂载状态见
+- `ideall-desktop`：GPUI + gpui-component 桌面壳；Editor、Explorer 与 Browser
+  的状态边界见
   [`docs/design/desktop-components.md`](../docs/design/desktop-components.md)。
 - `ideall-mobile`：gpui-mobile iOS/Android 静态/动态库入口，并包含 Android Gradle 与 iOS XcodeGen 工程壳。gpui-mobile 使用 `vendor/gpui-mobile` 中可追溯的固定源码快照，来源、许可证、本地差异校验和与升级步骤见其 `README.md`。CI 还会联网比对固定上游 revision，拒绝未登记的源码漂移。块编辑变换与桌面共用 `ideall-application::note_edit`，移动硬件键盘和 Unicode 输入辅助保留在 `src/editor.rs`，系统文本输入桥收口在 `src/native_text.rs`。Android 需要 SDK、NDK、`cargo-ndk` 和 Gradle 8.9+；iOS 需要 Xcode 16 与 XcodeGen。真机签名通过 `IDEALL_DEVELOPMENT_TEAM` 传入。
 - `ideall-cli`：数据库 doctor、V2 归档预检/原子导入、外部 ACP v1，以及不回显凭据/正文的真实模型与同步 staging 探测。
@@ -104,16 +104,16 @@ ACP 权限请求当前全部拒绝；外部进程本身仍拥有当前系统账�
 因此只应配置可信程序。移动端不具备子进程能力，明确仅提供 BYOK 模型后端。
 
 原生壳在“应用”中展示同一份按目标平台计算的 Engine capability 清单。页面、书签、
-关注、对话、文件树、Preview 和 Code 使用原生 renderer；资讯/社区仅进入隔离 WebView，
-Linux 因 GPUI 子窗口限制改由系统浏览器打开。桌面音频和 SQLite 文件只导出只读临时
-副本并交给系统应用，移动端仅展示安全元数据。Git 与 Shell Engine 当前明确为不可用。
+关注、对话、文件树、文本和 Preview 使用原生 renderer；文本文件统一按扩展名选择轻量
+显示优化，不提供独立开发工具。资讯/社区仅进入隔离 WebView，Linux 因 GPUI 子窗口限制
+改由系统浏览器打开。桌面音频只导出只读临时副本并交给系统应用，移动端仅展示安全元数据；
+其他二进制文件统一进入通用预览。
 桌面 Browser 作为标签宿主中的独立 Surface 渲染，保留 `FileRef + Engine` 标签身份，但不再
 复用文档编辑器的标题、查找、保存或行列状态栏；书签可在 Browser 与书签编辑 Engine 间显式
 切换。
-桌面源码已把 Shell 的显式 program/argv 执行核心收口为独立、未挂载组件，但在具备目录
-授权、跨平台 PTY、进程隔离和审计前仍不注册 renderer，也不向导航、快捷键或 Agent 暴露
-任意路径执行能力。这些降级是可测试的产品能力，不以占位入口冒充专业实现。
+默认构建不注册仓库、终端或数据库文件 Engine，也不向导航、快捷键或 Agent 暴露任意路径
+执行能力。
 
 原生 UI 依赖的许可证选择记录见 [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)。
 
-完整迁移门禁见 [`docs/design/gpui-migration.md`](../docs/design/gpui-migration.md)。
+平台支持范围与剩余人工门禁见 [`docs/platform-support.md`](../docs/platform-support.md)。

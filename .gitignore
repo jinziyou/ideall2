@@ -1,35 +1,16 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-/node_modules
-/.pnp
-.pnp.js
-.yarn/install-state.gz
-# pnpm 本地内容寻址 store (不入库; 误提交可 git rm -r --cached .pnpm-store)
+# Node 只用于仓库维护脚本。
+/node_modules/
 /.pnpm-store/
 
-# testing
-/coverage
-
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# local env files（保留 .env.example 受 Git 管理）
+# 本地环境与敏感文件。
 .env
 .env.*
 !.env.example
+*.pem
+.DS_Store
+npm-debug.log*
 
-# vercel
-.vercel
-
-# release and native build outputs
-/registry-ready/
+# Rust、桌面和移动构建产物。
 /native/target/
 /native/.link-libs/
 /native/apps/ideall-mobile/platforms/android/.gradle/
@@ -38,16 +19,8 @@ yarn-error.log*
 /native/apps/ideall-mobile/platforms/ios/Ideall.xcodeproj/
 /native/apps/ideall-mobile/platforms/ios/build/
 
-# redesign 设计探索 / 截图 scratch (本地参考, 不入库)
-/redesign-mockups/
-
-# 内部战略文档 (含竞品/变现坦白分析, 勿入公开仓库)
-/docs/strategy-internal.md
-
-# 根目录临时验证脚本 (应放在 scripts/)
+# 本地临时验证与 agent/harness 状态。
 /.verify-*.mjs
-
-# local agent/harness state
-.claude/settings.local.json
-.claude/scheduled_tasks.lock
-.claude/worktrees/
+/.agents/
+/.claude/
+/.codex/

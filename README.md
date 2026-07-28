@@ -101,7 +101,7 @@ pnpm test:scripts      # 发布与仓库维护脚本测试
 - `.github/workflows/ci.yml` 验证文档、Actions、版本与维护脚本。
 
 真实发布仍需各平台签名身份，以及中文 IME、候选窗、选区、VoiceOver/TalkBack 和安装升级
-人工矩阵。证据与剩余门禁见 [GPUI 迁移记录](docs/design/gpui-migration.md)和
+人工矩阵。证据与剩余门禁见 [平台支持状态](docs/platform-support.md)和
 [原生发布手册](native/RELEASE.md)。
 
 ## 文档

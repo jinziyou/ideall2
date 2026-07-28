@@ -1,4 +1,4 @@
-use super::*;
+use crate::*;
 use gpui::{KeyBinding, actions};
 
 actions!(

@@ -15,7 +15,7 @@ impl IdeallDesktop {
         !self.show_trash
             && self.editor.selected_kind == Some(NodeKind::Note)
             && self.editor.body_editable
-            && self.editor.active_engine_id.as_deref() != Some("ideall.code")
+            && self.editor.active_engine_id.as_deref() != Some("ideall.text")
     }
 
     pub(crate) fn note_editor_focused(&self, window: &Window, cx: &Context<Self>) -> bool {

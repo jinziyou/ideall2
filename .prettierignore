@@ -5,17 +5,17 @@ native/.link-libs
 native/apps/ideall-mobile/platforms/android/.gradle
 native/apps/ideall-mobile/platforms/android/app/build
 native/apps/ideall-mobile/platforms/ios/build
-registry-ready
 
 # WiX XML 使用其自有 schema/格式器，Prettier 会把 .wxs 误判为 JavaScript。
 native/scripts/resources/windows/*.wxs
 
 # 本地工具/会话配置
+.agents
 .claude
+.codex
 
 # 生成文件
 pnpm-lock.yaml
 
 # 文档表格/中文段落不参与按宽度 reflow
 *.md
-docs/*.html

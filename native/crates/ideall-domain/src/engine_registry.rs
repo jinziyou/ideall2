@@ -31,6 +31,36 @@ impl Default for EnginePreferences {
     }
 }
 
+impl EnginePreferences {
+    pub fn migrate_retired_engines(&mut self) {
+        self.files
+            .retain(|_, engine_id| migrate_engine_id(engine_id));
+        self.media_types
+            .retain(|_, engine_id| migrate_engine_id(engine_id));
+        for engine_ids in self.removed.values_mut() {
+            let mut migrated = BTreeSet::new();
+            for mut engine_id in std::mem::take(engine_ids) {
+                if migrate_engine_id(&mut engine_id) {
+                    migrated.insert(engine_id);
+                }
+            }
+            *engine_ids = migrated;
+        }
+        self.removed.retain(|_, engine_ids| !engine_ids.is_empty());
+    }
+}
+
+fn migrate_engine_id(engine_id: &mut String) -> bool {
+    match engine_id.as_str() {
+        "ideall.code" => {
+            *engine_id = "ideall.text".into();
+            true
+        }
+        "ideall.database" | "ideall.git" | "ideall.shell" => false,
+        _ => true,
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EngineResolutionSource {
     FilePreference,
@@ -203,7 +233,6 @@ pub fn builtin_engines() -> Vec<EngineDescriptor> {
             &["application/vnd.ideall.thread+json"],
         ),
         read_only_descriptor("ideall.audio", "音频", 900, &["audio/*"]),
-        read_only_descriptor("ideall.database", "数据库", 880, &["application/x-sqlite3"]),
         descriptor(
             "ideall.browser",
             "浏览器",
@@ -211,8 +240,8 @@ pub fn builtin_engines() -> Vec<EngineDescriptor> {
             &["text/uri-list", "application/vnd.ideall.bookmark+json"],
         ),
         descriptor(
-            "ideall.code",
-            "开发",
+            "ideall.text",
+            "文本",
             700,
             &[
                 "text/*",
@@ -322,7 +351,7 @@ mod tests {
                 .candidate
                 .descriptor
                 .engine_id,
-            "ideall.code"
+            "ideall.text"
         );
         preferences
             .media_types
@@ -335,7 +364,7 @@ mod tests {
         );
         preferences
             .files
-            .insert(markdown.r#ref.to_key().unwrap(), "ideall.code".into());
+            .insert(markdown.r#ref.to_key().unwrap(), "ideall.text".into());
         assert_eq!(
             resolve_default_engine(&descriptors, &markdown, &preferences)
                 .unwrap()
@@ -351,21 +380,49 @@ mod tests {
         let mut preferences = EnginePreferences::default();
         preferences.removed.insert(
             "text/markdown".into(),
-            BTreeSet::from(["ideall.code".into(), "ideall.preview".into()]),
+            BTreeSet::from(["ideall.text".into(), "ideall.preview".into()]),
         );
         assert!(resolve_default_engine(&descriptors, &markdown, &preferences).is_some());
     }
 
     #[test]
-    fn unfinished_professional_engines_are_explicitly_read_only() {
+    fn audio_engine_is_explicitly_read_only() {
         let descriptors = builtin_engines();
+        let descriptor = descriptors
+            .iter()
+            .find(|descriptor| descriptor.engine_id == "ideall.audio")
+            .expect("missing built-in audio engine");
+        assert_eq!(descriptor.access, EngineAccess::ReadOnly);
+    }
 
-        for engine_id in ["ideall.audio", "ideall.database"] {
-            let descriptor = descriptors
-                .iter()
-                .find(|descriptor| descriptor.engine_id == engine_id)
-                .unwrap_or_else(|| panic!("missing built-in engine {engine_id}"));
-            assert_eq!(descriptor.access, EngineAccess::ReadOnly);
-        }
+    #[test]
+    fn retired_preferences_migrate_to_the_simplified_engine_set() {
+        let mut preferences = EnginePreferences::default();
+        preferences
+            .files
+            .insert("file".into(), "ideall.code".into());
+        preferences
+            .media_types
+            .insert("application/x-sqlite3".into(), "ideall.database".into());
+        preferences.removed.insert(
+            "text/plain".into(),
+            BTreeSet::from(["ideall.code".into(), "ideall.git".into()]),
+        );
+
+        preferences.migrate_retired_engines();
+
+        assert_eq!(
+            preferences.files.get("file").map(String::as_str),
+            Some("ideall.text")
+        );
+        assert!(
+            !preferences
+                .media_types
+                .contains_key("application/x-sqlite3")
+        );
+        assert_eq!(
+            preferences.removed["text/plain"],
+            BTreeSet::from(["ideall.text".into()])
+        );
     }
 }

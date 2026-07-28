@@ -92,15 +92,15 @@ pub fn engine_runtime_capabilities(platform: EnginePlatform) -> Vec<EngineRuntim
         EngineRuntimeKind::SystemExternal => "当前 GPUI 后端没有可靠子窗口 WebView，交给系统浏览器",
         _ => "仅在受支持的桌面或移动目标上启用 WebView",
     };
-    let professional_file_kind = if platform.is_mobile() {
+    let audio_kind = if platform.is_mobile() {
         EngineRuntimeKind::MetadataOnly
     } else {
         EngineRuntimeKind::SystemExternal
     };
-    let professional_file_detail = if platform.is_mobile() {
+    let audio_detail = if platform.is_mobile() {
         "显示文件类型、大小与 Blob 身份；移动文件交接尚未提供安全 URI bridge"
     } else {
-        "以只读临时副本交给用户选择的系统应用；ideall 不解释或修改专业格式"
+        "以只读临时副本交给用户选择的系统应用；ideall 不解释或修改音频格式"
     };
 
     vec![
@@ -147,47 +147,20 @@ pub fn engine_runtime_capabilities(platform: EnginePlatform) -> Vec<EngineRuntim
             "Markdown 预览；其他格式显示安全元数据",
         ),
         capability(
-            "ideall.code",
-            "开发",
+            "ideall.text",
+            "文本",
             native,
             read_write,
             if platform.is_mobile() {
-                "移动文本编辑；不宣称桌面级语法服务"
+                "纯文本查看与轻编辑"
             } else {
-                "GPUI code editor 与按扩展名语法高亮"
+                "纯文本查看与编辑；按文件后缀优化显示"
             },
         ),
         capability("ideall.browser", "浏览器", web_kind, read_only, web_detail),
         capability("ideall.info", "资讯", web_kind, read_only, web_detail),
         capability("ideall.community", "社区", web_kind, read_only, web_detail),
-        capability(
-            "ideall.audio",
-            "音频",
-            professional_file_kind,
-            read_only,
-            professional_file_detail,
-        ),
-        capability(
-            "ideall.database",
-            "数据库",
-            professional_file_kind,
-            read_only,
-            professional_file_detail,
-        ),
-        capability(
-            "ideall.git",
-            "Git",
-            EngineRuntimeKind::Unavailable,
-            read_only,
-            "未提供经目录授权的仓库 provider；不会对任意路径调用 git",
-        ),
-        capability(
-            "ideall.shell",
-            "终端",
-            EngineRuntimeKind::Unavailable,
-            read_only,
-            "未提供跨平台 PTY、进程隔离和命令审计；不会降级为无约束 shell",
-        ),
+        capability("ideall.audio", "音频", audio_kind, read_only, audio_detail),
         capability(
             "ideall.extensions",
             "扩展",
@@ -234,7 +207,7 @@ mod tests {
     }
 
     #[test]
-    fn every_professional_engine_has_an_explicit_runtime_state() {
+    fn every_visible_engine_has_an_explicit_runtime_state() {
         for platform in [
             EnginePlatform::LinuxDesktop,
             EnginePlatform::MacosDesktop,
@@ -247,10 +220,7 @@ mod tests {
                 "ideall.community",
                 "ideall.browser",
                 "ideall.audio",
-                "ideall.code",
-                "ideall.git",
-                "ideall.shell",
-                "ideall.database",
+                "ideall.text",
                 "ideall.extensions",
             ] {
                 let capability = find(platform, engine_id);
@@ -260,18 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_process_engines_are_not_claimed_as_native() {
-        for platform in [EnginePlatform::LinuxDesktop, EnginePlatform::Android] {
-            for engine_id in ["ideall.git", "ideall.shell"] {
-                let capability = find(platform, engine_id);
-                assert_eq!(capability.kind, EngineRuntimeKind::Unavailable);
-                assert_eq!(capability.access, EngineAccess::ReadOnly);
-            }
-        }
-    }
-
-    #[test]
-    fn platform_web_and_professional_file_downgrades_are_precise() {
+    fn platform_web_and_audio_downgrades_are_precise() {
         assert_eq!(
             find(EnginePlatform::LinuxDesktop, "ideall.info").kind,
             EngineRuntimeKind::SystemExternal
@@ -285,7 +244,7 @@ mod tests {
             EngineRuntimeKind::MetadataOnly
         );
         assert_eq!(
-            find(EnginePlatform::WindowsDesktop, "ideall.database").kind,
+            find(EnginePlatform::WindowsDesktop, "ideall.audio").kind,
             EngineRuntimeKind::SystemExternal
         );
     }

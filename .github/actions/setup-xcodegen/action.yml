@@ -1,0 +1,53 @@
+name: Setup XcodeGen
+description: Restore a checksum-verified, pinned XcodeGen release without Homebrew.
+
+inputs:
+  version:
+    description: XcodeGen release to install.
+    required: false
+    default: "2.46.0"
+  sha256:
+    description: SHA-256 digest for the official xcodegen.zip release asset.
+    required: false
+    default: "4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806"
+
+runs:
+  using: composite
+  steps:
+    - name: Restore XcodeGen
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/Library/Caches/ideall/xcodegen/${{ inputs.version }}
+        key: ${{ runner.os }}-${{ runner.arch }}-xcodegen-${{ inputs.version }}-${{ inputs.sha256 }}
+    - name: Install checksum-verified XcodeGen
+      shell: bash
+      env:
+        XCODEGEN_VERSION: ${{ inputs.version }}
+        XCODEGEN_SHA256: ${{ inputs.sha256 }}
+      run: |
+        [[ "$XCODEGEN_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+          echo "invalid XcodeGen version: $XCODEGEN_VERSION" >&2
+          exit 2
+        }
+        [[ "$XCODEGEN_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
+          echo "invalid XcodeGen checksum" >&2
+          exit 2
+        }
+        tool_dir="$HOME/Library/Caches/ideall/xcodegen/$XCODEGEN_VERSION"
+        executable="$tool_dir/xcodegen/bin/xcodegen"
+        if [[ ! -x "$executable" ]]; then
+          archive="$RUNNER_TEMP/xcodegen-$XCODEGEN_VERSION.zip"
+          curl \
+            --fail \
+            --location \
+            --retry 3 \
+            --silent \
+            --show-error \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip" \
+            --output "$archive"
+          printf '%s  %s\n' "$XCODEGEN_SHA256" "$archive" | shasum -a 256 --check
+          mkdir -p "$tool_dir"
+          ditto -x -k "$archive" "$tool_dir"
+        fi
+        echo "$tool_dir/xcodegen/bin" >> "$GITHUB_PATH"
+        "$executable" --version

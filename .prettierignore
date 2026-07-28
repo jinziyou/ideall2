@@ -1,28 +1,21 @@
 # 构建产物 / 依赖
 node_modules
-.next
-out
-*.tsbuildinfo
-next-env.d.ts
+native/target
+native/.link-libs
+native/apps/ideall-mobile/platforms/android/.gradle
+native/apps/ideall-mobile/platforms/android/app/build
+native/apps/ideall-mobile/platforms/ios/build
+registry-ready
 
-# Tauri 工程生成/构建产物 (Rust 不走 prettier; gen/target 的 json 勿格式化)
-src-tauri/gen
-src-tauri/target
+# WiX XML 使用其自有 schema/格式器，Prettier 会把 .wxs 误判为 JavaScript。
+native/scripts/resources/windows/*.wxs
 
 # 本地工具/会话配置
 .claude
 
-# 生成文件 (由 openapi-typescript / sync 脚本产出, 勿手动格式化)
-src/lib/api/server.d.ts
-openapi
+# 生成文件
 pnpm-lock.yaml
 
-# 静态资源与文档 (文档表格/中文段落不参与按宽度 reflow)
-public
+# 文档表格/中文段落不参与按宽度 reflow
 *.md
 docs/*.html
-
-# 设计系统同步生成物（含打包后的 React/vendor 代码）
-ds-bundle
-.ds-sync
-.design-sync

@@ -1,0 +1,30 @@
+name: Setup cargo-ndk
+description: Restore or install the repository's pinned cargo-ndk binary.
+
+inputs:
+  version:
+    description: cargo-ndk release to install.
+    required: false
+    default: "4.1.2"
+
+runs:
+  using: composite
+  steps:
+    - name: Restore cargo-ndk binary
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cargo/bin/cargo-ndk
+        key: ${{ runner.os }}-${{ runner.arch }}-cargo-ndk-${{ inputs.version }}
+    - name: Install pinned cargo-ndk
+      shell: bash
+      env:
+        CARGO_NDK_VERSION: ${{ inputs.version }}
+      run: |
+        [[ "$CARGO_NDK_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+          echo "invalid cargo-ndk version: $CARGO_NDK_VERSION" >&2
+          exit 2
+        }
+        if ! cargo ndk --version 2>/dev/null | grep -F "$CARGO_NDK_VERSION" >/dev/null; then
+          cargo install cargo-ndk --version "$CARGO_NDK_VERSION" --locked
+        fi
+        cargo ndk --version

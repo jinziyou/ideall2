@@ -1,0 +1,73 @@
+name: Ideall
+options:
+  bundleIdPrefix: com.jinziyou
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "16.0"
+
+targets:
+  Ideall:
+    type: application
+    platform: iOS
+    sources:
+      - path: main.m
+        buildPhase: sources
+      - path: gpui_ios.h
+        buildPhase: headers
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jinziyou.ideall
+        PRODUCT_NAME: ideall
+        INFOPLIST_FILE: Info.plist
+        TARGETED_DEVICE_FAMILY: "1,2"
+        IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+        CLANG_ENABLE_OBJC_ARC: YES
+        ENABLE_BITCODE: NO
+        ENABLE_DEBUG_DYLIB: NO
+        DEAD_CODE_STRIPPING: NO
+        VALID_ARCHS: arm64
+        ARCHS: arm64
+        ONLY_ACTIVE_ARCH: YES
+        OTHER_LDFLAGS:
+          - -force_load
+          - $(IDEALL_STATIC_LIB)
+          - -lc++
+          - -framework UIKit
+          - -framework Metal
+          - -framework MetalKit
+          - -framework QuartzCore
+          - -framework CoreGraphics
+          - -framework CoreText
+          - -framework CoreFoundation
+          - -framework Foundation
+          - -framework Security
+          - -framework SystemConfiguration
+          - -framework WebKit
+          - -framework UniformTypeIdentifiers
+          - -framework CoreMedia
+          - -framework AVFoundation
+          - -ObjC
+        "IDEALL_STATIC_LIB[sdk=iphonesimulator*]": "$(PROJECT_DIR)/../../../../target/aarch64-apple-ios-sim/$(IDEALL_RUST_PROFILE)/libideall_mobile.a"
+        "IDEALL_STATIC_LIB[sdk=iphoneos*]": "$(PROJECT_DIR)/../../../../target/aarch64-apple-ios/$(IDEALL_RUST_PROFILE)/libideall_mobile.a"
+  IdeallUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: IdeallUITests
+    dependencies:
+      - target: Ideall
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jinziyou.ideall.uitests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  Ideall:
+    build:
+      targets:
+        Ideall: all
+        IdeallUITests:
+          - test
+    test:
+      targets:
+        - IdeallUITests

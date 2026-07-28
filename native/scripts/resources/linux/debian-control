@@ -1,0 +1,11 @@
+Package: ideall
+Version: @IDEALL_VERSION@
+Section: utils
+Priority: optional
+Architecture: @IDEALL_DEBIAN_ARCH@
+Maintainer: ideall contributors
+Depends: libfontconfig1, libfreetype6, libxcb1, libxkbcommon-x11-0, libvulkan1
+Homepage: https://github.com/jinziyou/ideall
+Description: Local-first personal information terminal
+ ideall is a native GPUI personal information workspace with local SQLite
+ storage, synchronization, archive, agent and extensible renderer support.

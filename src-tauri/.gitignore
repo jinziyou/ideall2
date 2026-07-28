@@ -1,5 +1,0 @@
-# Rust 构建产物
-/target/
-
-# Tauri 生成物 (schema / 移动端工程脚手架, 由 `tauri *` 命令再生)
-/gen/

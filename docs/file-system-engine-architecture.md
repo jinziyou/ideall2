@@ -1,121 +1,77 @@
-# 文件系统与引擎架构
+# FileSystem 与 Engine 架构
 
-本文记录 ideall 五层模型当前的实现约定：
+ideall 使用同一套五层模型组织本地内容、打开方式与界面：
 
 ```text
-Storage → FileSystem → IdeallFile → Engine → Display
+Storage → FileSystem → FileRef → Engine → Display
 ```
 
-## 身份与挂载
+## Storage
 
-- Storage 是物理来源和 provenance，包括本地 Node/Blob、插件 IndexedDB、ServerPort、本机 App 与第三方数据。来源保留自己的事务、同步和权限语义，不强行实现一套通用 CRUD。
-- 一个 `FileSystemProvider` 对应一个可独立挂载的文件系统实例。registry 按 `fileSystemId` 分派，允许注册多个同类来源。
-- `FileRef { fileSystemId, fileId }` 是文件身份；名称、路径和父目录不参与身份。`DirectoryEntry` 独立引用 `FileRef`，同一文件可出现在多个目录中；删除 link 或 mount 不等于删除源文件。可选的 `pathName` 是 parent 内的稳定路径分量，只属于目录项。
-- `ideall.root` 是隐藏的合成根。它把 `home / activity / browse / apps / settings` 五个路径分量链接到 `ideall.navigation` 的五个目录，并接纳运行期 manifest 挂载；动态来源不会改变一级分区集合。
-- `/home/bookmarks` 之类路径由 `src/filesystem/path.ts` 逐级读取目录项并跟随 target；解析结果仍是原始 `FileRef`。路径解析继续经过 FileSystem registry、分页防环和访问上下文，不能成为授权旁路。
-- `mountFileSystem()` 原子注册 provider 并向合成根贡献 mount；失败时回滚，卸载时只注销 provider 和目录项，不删除来源数据。运行时扩展可把多个 mount 与成对的 Engine descriptor/renderer 放在同一批次安装，任一贡献失败都会逆序回滚，观察者只在最终状态确定后刷新。
-- `ideall.core` 的 Resource 兼容投影由 `src/filesystem/resource-file-system.ts` 实现；Node 与连接数据的 `ResourceSourceProvider` 收口在 `src/filesystem/resource-sources/`，只作为该 FileSystem provider 的内部来源接口。现行代码不再有 `src/vfs` 并行挂载层。
+Storage 是物理数据与事务边界。当前权威实现是 `ideall-storage` 的 SQLite 数据库；同步、
+安全存储和网络是独立适配器，不伪装成 UI 状态。
 
-## 文件系统访问契约
+- Node、Blob、回收快照和 Agent 审计在事务内保持引用一致。
+- 全文/语义投影属于可删除、可重建缓存。
+- 凭据不进入 SQLite。
+- V2 归档导入先写临时数据库，校验成功后再原子替换。
 
-- `IdeallFile.kind` 只表达 `file | directory`；业务含义由开放的 `mediaType`、`properties` 和 `capabilities` 表达。metadata 与目录项不得携带需要额外授权的正文或二进制。
-- provider 统一暴露 `stat/readDirectory/read/write/actions/invoke`，并可选实现 `statMany/readMany/watch`。`statMany` 与 `readMany` 的结果必须与输入 `FileRef` 一一对应且保持顺序：只有不存在用 `null` 表达，授权、consent、离线等错误继续抛出；`statMany` 的非空 metadata 还必须返回相同 `FileRef`。registry 按 provider 分组，缺少原生 batch 时使用默认 4、最大 32 的有限并发 fallback。`readDirectory({ recursive:true })` 是可选的扁平后代投影，目录项仍保留稳定目标 `FileRef`，供兼容批量读取避免逐目录全表扫描；不支持的 provider 应明确返回 `unsupported`。创建文件和来源特有的变更通过目录上的显式 action 表达。
-- `DirectoryEntry.file` 可携带目录查询已经取得的安全 metadata snapshot，且 snapshot 的 `ref` 必须等于 `target`；它不能包含需要额外授权的正文。兼容 `FilesPort` 用 async iterator 按 cursor/limit 逐页消费目录，每页优先调用 `readMany`，fallback 也受并发上限约束；`listNoteChildren(parentId)` 直接查询对应目录，不再为一个父节点读取全部笔记。重复 cursor 被视为 provider 不可用错误，不能静默返回不完整结果。
-- `FileAction.kind` 是 `display | invoke | specialized` 判别联合。`invoke` 可声明可序列化的 input/output JSON-Schema 子集、字段 UI hint、`risk` 与 `idempotent`；Display 据此生成文本、数字、布尔、枚举、JSON 和文件输入。`display` 只用于导航，`specialized` 留给 OAuth、多步事务等场景 UI。高风险动作必须确认，确认目标会固定 `FileRef + version`；生成式菜单与 specialized `FileDocumentClient` 都把该快照版本经 `FileActionInvokeOptions.expectedVersion` 原样传到 provider/Resource source。provider 必须在目标临界区 fresh-read 并拒绝陈旧版本；支持事务的 Storage 还要把同一基线下沉到提交事务。版本不进入 action input，provider 仍是最终授权与输入校验者。
-- `stat` 用 `null` 统一表达不存在，其他读取仍返回 `not-found`。`read.range` 是以字节计数的 end-exclusive 区间；不能进行字节寻址的结构化来源必须返回 `unsupported`，不能静默按字符切片。
-- `FileSystemAccessContext` 由 `actor`、`permissions` 以及可选的 `activeFile`、`intent` 组成。provider 根据调用者、权限、意图和精确文件引用执行授权，不从 workspace 全局状态推断权限。
-- `actor` 包括 `ui | agent | embed | engine | system`。引擎授权仅作用于与 `activeFile` 完全相同的 `FileRef`；`system` 不会被隐式提升成 UI 权限。
-- 文件 capability 描述 provider 可提供的操作，但不是授权票据。`read-only` 等 Engine access 只约束 Display 交互形态，最终读写权限仍由 provider 和访问上下文判定。
-- 带 `expectedVersion` 的本地写入或 action 把“读取当前版本、校验和副作用”放在同一文件临界区。Web 端优先使用以 FileRef 哈希命名的 Web Locks，并回退进程内 keyed mutex；原生 guarded FS 使用 grant + entry identity 的 mutex。`undefined` 明确表示兼容性无前置条件，`null` 表示只接受无版本目标；集合新增、导入等没有稳定单目标版本的 action 不伪造 CAS。Resource Node 写入进一步把基线送进 Storage 事务，并直接投影 mutation 返回的 committed `ResourceRecord`，不做提交后 `stat`；存储更新时间即使处于同一毫秒也严格递增。
+## FileSystem 与 FileRef
 
-## Engine 与 Display
+`FileRef` 是内容稳定身份，目录路径、名称和排序只是投影。移动、重命名或从不同目录链接同一
+对象时，不应改变其身份。
 
-- Engine descriptor 只声明匹配条件、优先级、布局、access 和是否支持独立窗口，不直接引用 React 组件。
-- 媒体类型匹配借 shared-mime-info 的 `<sub-class-of>` 引入显式 subclass 表（`src/engines/media-type-tree.ts`）：pattern 直接未命中时沿父链上溯，命中按距离折损特异度（`SUBCLASS_DISTANCE_PENALTY = 150`，折损后 ≤0 不匹配）。subclass 关系**只来自显式表，不做隐式 suffix（+xml/+json）推导**；`application/vnd.ideall.*` 语义类型不进表、无父类，隔离性不被层级穿透。父链命中低于同模式直接命中，未登记的标准类型（如 `application/yaml`）因此优雅降级到声明父类型的引擎（code），而不是只剩通用预览。默认解析的 media type 偏好查找同样沿父链上溯（近亲优先）：父类型上的默认引擎对子类型生效，精确偏好永远优先。设计与语料保全论证见 [freedesktop-alignment.md](freedesktop-alignment.md) §3。
-- Display 通过动态 `FileEngineRendererRegistry` 按 `engineId` 注册渲染回调。`registerFileEngineContribution()` 会原子注册 descriptor 与 renderer，拒绝重复或半注册；workspace 订阅 registry revision，因此运行期注册和卸载会立即反映到视图。
-- shell 启动时由 composition root 注册内置 renderer。未注册 renderer 的 Engine 显示受控的不支持状态，不在 workspace 中维护静态 renderer switch。
-- 默认 Engine 解析顺序为：当前工作区的单文件偏好、当前工作区的 media type 偏好、工作区默认策略、候选 Engine 的 priority/specificity、通用预览兜底。旧的全局偏好键作为文件工作区偏好继续使用，音频与开发工作区使用独立键。偏好格式为 v2：增加 Removed Associations（mimeapps.list 语义）——按类型屏蔽的引擎沿 subclass 父链从候选剔除，作用于 media type 偏好与 priority 两层；单文件显式偏好优先于屏蔽；屏蔽不得清空候选（全被屏蔽时失效，保留兜底）；「设为默认」自动解除同类型同引擎的屏蔽。读取兼容 v1 并升级为空屏蔽表，写出一律 v2。三个工作区 scope 的关联同时投影为 `app.display` 的 `engines.json`（见「当前文件系统」节）。
-- 标签身份是 `FileRef + engineId`。Engine 菜单可将同一文件以其他匹配 Engine 在当前工作区打开，因此音频、开发、数据库或通用预览可以同时存在为不同标签。
-- 文件视图首次通过 `stat` 取元数据，并在 provider 支持时订阅 `watch` 后重新 `stat`。FileSystem registry 拥有底层 watcher 生命周期：同一 provider/目标/上下文的订阅共享一条底层 watch，最后一个观察者离开或 provider 被替换、注销、清空时自动 best-effort 释放；回调绑定 provider generation，旧实例的迟到事件会被丢弃。`FileSystemWatchEventHub` 已用于音频和数据库 provider：它把增量事件路由到目标及 old/new parent，并按批次合并同一目录项的变化；同一 `FileRef` 的多个 link 仍以 parent-scoped `entryId` 区分。目录 Display 对完整加载且身份明确的 `changed` 只重取单项 metadata、对 `deleted` 本地移除；created/move、自身事件、分页、异常信封或竞态失败统一回退全量读取。无 `watch` 的 provider 使用重新进入或显式刷新。
-- Database、Audio、Git 与 Agent 的 manifest data-port 整包导入在 Storage 成功提交且写锁释放后，通过 `plugins/shared/plugin-mutation-channel` 补齐 provider `watch` 失效。通道在同一 JavaScript realm 复用一条 `BroadcastChannel` transport，不会为每个打开的曲目、表、仓库文件或配置 section 建立跨窗口连接；最后一个订阅释放时关闭。跨 Tauri 窗口只传 `{sender,fileSystemId}`，不传路径、实体、正文或凭据，接收方把它映射为 `changed` 并重读 Storage。Database、Audio 和 Git 同时消费本地与跨窗口信号；Agent 同窗口沿用各 section store 的精确订阅，只消费跨窗口整包信号，避免一次导入重复刷新。导入失败不发布；provider 自身 mutation 继续只走原有本地 hub/store 通知，不反向发布整包信号。重复 `changed` 只是幂等失效，不能作为数据载荷或提交收据。
-- 旧静态 tab、Resource tab 与 Node tab 只在深链解析和 workspace hydration 边界迁移成 File + Engine；导航分区与工作区切换只处理规范化后的 descriptor。`TabContent` 只接受 File + Engine 标签，旧 descriptor 不再有第二套直接渲染分支。
-- 通用开发 Display 保留脏草稿和外部版本冲突。只有声明 `suspension: "serializable"` 且已成功写入身份绑定休眠快照的 dirty Engine 才可被 LRU 卸载；快照仅存当前窗口 `sessionStorage`，限制单份 1 MiB、合计 4 MiB、最多 24 份，并按 `tabId + engineId + fileKey` 严格恢复。序列化失败、超限或不支持休眠的 dirty Engine 继续保持挂载；关闭标签和离开页面仍使用全局 dirty 告警。`read-only` Engine 会同时禁用正文写入及 Node 工具栏中的重命名、标签和删除操作。
+FileSystem 对上提供受控的读取、列举、写入和动作语义；provider 保留自己的权限、事务和
+版本规则。Display 和 Agent 都不能绕过 FileSystem 直接访问底层 Storage。
 
-## 工作区与固定导航分区
+关键约束：
 
-- 工作区与视图是同一个 Display 概念，由 `WorkspaceKind = files | audio | development` 表达。工作区通过全局命令面板（`⌘K` / `Ctrl+K`，或顶栏搜索入口）切换，不生成活动栏、目录树或移动导航项。
-- 文件工作区是默认基础视图，包含文件树、标签页、文件渲染和 AI Agent。音频工作区在其上增加保持挂载的音频播放区；开发工作区在其上增加保持挂载的 Git / 数据库 / Shell 工具区。这些工具显示在工作区 Dock 中，关闭 Dock 会返回文件工作区。音频播放区与音频 File Engine 共用 shell 级播放控制器和唯一媒体元素，切换文件或工作区不会产生并行播放器。
-- 工作区切换只改变 Display 组合和无显式偏好时的 Engine 选择，不改变当前 `FileRef`、既有标签、脏草稿、根目录或文件系统挂载。若活动标签是文件，Display 会为同一 `FileRef` 激活新场景的默认 Engine 标签；旧 Engine 标签继续保留。隐藏工具区保持挂载，避免切换后中断播放或 Shell 会话。
-- 音频工作区对 `audio/*` 文件默认使用音频 Engine；开发工作区对通用文本文件默认使用 Code Engine；文件工作区使用通用预览。用户设置的单文件或 media type 偏好优先于这些默认策略。
-- 活动栏一级分区固定为：**我的**、**活动**、**浏览**、**应用**、**设置**。对应的二级侧栏分别为：“收件箱 / 关注 / 书签 / 资源 / 文件”、“审计 / 空间 / 任务 / 删除”、“新闻 / 社区 / 浏览器”、“搜索 / 本地应用”、“基本 / AI”。名称、顺序和目标来自 `ideall.root → ideall.navigation` 的目录项；React 配置只保留图标与颜色装饰。桌面活动栏、二级侧栏和移动抽屉读取同一投影。
-- “关注 / 书签 / 资源 / 删除 / 本地应用”不是管理 panel 的第二套文件，而是分别链接到 `ideall.core` 的 subscriptions/bookmarks/files 目录、`ideall.trash` 根和 `third-party.installed-apps` 根。每个根由专用语义 Engine 保留原管理 Display；通用 Directory Engine 仍是可选视图。旧 `panel:subscriptions|bookmarks|files|trash|apps` 只作为深链、启动目标和 workspace 快照的输入别名，在打开或水合边界归一到真实根，因此不会产生双标签。例外：“收件箱”的导航 target 当前仍是 `ideall.core / panel:inbox` 文件（`ideall.panel` Engine），是唯一保留为导航 target 的 panel 文件。
-- “审计 / 空间 / 任务 / 基本 / AI”同样不再使用 panel 文件：`/activity/audit` 链接到只读 `app.agent-write-audit` 文件；`/activity/spaces`、`/activity/tasks` 分别链接到 `app.agent-config` 的 `config:workspaces`、`config:tasks`；`/settings/basic` 链接到 `app.settings` 根；`/settings/ai` 链接到 `app.agent-config` 的 `config:settings`。对应 preferred Engine/Display 为 `ideall.agent-write-audit` → `AgentWriteAudit`、`ideall.agent-spaces` → `AgentSpaces`、`ideall.agent-tasks` → `AgentTaskList`、`ideall.settings` → `SettingsPage`、`ideall.agent-settings` → `AiSettings`。这些路径是规范链接位置，文件身份仍由 target FileRef 决定。
-- 运行态入口生产者——活动栏、侧栏、移动底栏、命令面板、Home 概览/最近动态和操作成功回流——对有目录位置的目标直接调用 path target；无目录位置的能力直接调用 file/command target。shell 的规范路径从 navigation FileSystem 定义派生，不维护第二张 `href` 表。`save-to-mine` 的结果也只返回 `navigationPath`，由 UI 继续经过同一解析器打开。Next 路由只承担静态导出深链、认证/错误页和旧地址兼容。
-- `ideall.core` 内部的 AI `workspace` 目录继续承载兼容 FileRef 和旧快照，但设置 `navigationHidden`，不出现在左侧导航。AI 对话从所有工作区共享的右侧 Agent 面板到达；MCP、Skills 和规则从“设置 > AI”内打开。
+- metadata 不携带需要额外授权的正文、Blob 或凭据；
+- mutation 使用版本/CAS 语义，冲突不能静默覆盖；
+- destructive action 在执行点再次校验权限和目标；
+- Agent 访问额外受实时 Grant 和脱敏写审计约束；
+- 目录分页、批量读取和后台任务都有明确数量/体积预算。
 
-## 启动与独立窗口
+## Engine
 
-- 隐藏根本身不作为内容页显示；桌面活动栏和移动导航读取同一个完整合成根，并呈现相同的五个固定分区。二级侧栏读取当前 `ideall.navigation` 目录并通过 `/home/...` 等路径跟随 link；打开后标签仍以 `FileRef + engineId` 去重，同时保存不参与身份的 `navigationPath` 以唯一高亮符号链接位置。
-- 普通文件及完整 App surface 的规范深链使用 `/home?file=<FileRefKey>&engine=<engineId>`；专用语义 Engine 使用 `/home/inbox`、`/home/following`、`/home/bookmarks`、`/home/resources`、`/activity/deleted`、`/apps/local-apps` 以及 `/activity/audit`、`/activity/spaces`、`/activity/tasks`、`/settings/basic`、`/settings/ai` 作为可读规范 URL。同一文件切换到其他 Engine 时仍使用完整 FileRef 深链，避免刷新后被 preferred Engine 覆盖。旧 `/home/subscriptions`、`/trash`、`/apps`、`/home/settings`、`/ai`，以及旧 panel/static descriptor 仍是输入别名，但不会再生成 panel 标签。精确 legacy 路由 `/audio`、`/git`、`/database`、`/shell` 仅选择音频 Dock 或开发 Dock 的对应工具，不创建文件标签；旧 `?resource=`、`?node=` 与其余静态路由继续作为兼容入口。
-- 主窗口优先恢复 workspace 快照，包括当前导航分区、工作区、开发工具选择和标签。旧快照缺少工作区字段时回退文件工作区。没有可恢复标签时读取 `ideall:startup-target:v1`，无效时回退“我的”。
-- 独立窗口入口要求文件显式声明 `standalone-window` capability，同时 Engine descriptor 声明 `supportsStandaloneWindow`。程序化打开会重新 `stat`，独立窗口渲染入口也重复执行同一策略，不能用伪造 metadata 或 `display=window` 深链绕过。当前 `ideall.core` 的 Node 文件、音轨和数据库表可选择支持；远端文件、本机 App 和 Git 文件不会因此自动获得独立窗口权限。
-- 独立窗口使用 `file/engine/display=window` 内部深链，不恢复主 workspace。原生窗口创建命令仅授权 `main` 调用，URL 与 label 在 TypeScript 和 Rust 两侧校验；生成的 `engine-*` 窗口不继承主窗口的 secure-store、HTTP、Shell 或 guarded FS IPC capability。
+Engine 描述“如何打开一个 FileRef”。匹配输入包括 media type、文件属性、显式用户选择和
+平台 capability。标签身份由 `FileRef + Engine` 组成，因此同一内容可以同时用 Editor、
+Preview、Code 或 Browser 打开。
 
-## 当前文件系统
+Engine registry 位于 domain 层，只保存无 GPUI 类型的 descriptor 与选择规则。具体 renderer
+由桌面或移动组合根注册：
 
-Database 的 table 文件与 rows 目录使用 `database-v3:<sha256>` 聚合版本；摘要输入继续完整、确定性地覆盖 table 结构与全部 row，算法统一复用 `src/lib/semantic-version.ts` 的 SHA-256 实现，不能降级为短哈希或时间戳近似。
+- 桌面可组合 Editor、Preview、Code、Browser 与平台外部打开；
+- 移动端按触屏、系统输入代理和平台能力选择 renderer；
+- 不可用能力返回明确降级，不显示无法兑现的入口；
+- Browser、Shell 等 Engine 不升级为一级导航分区。
 
-- `ideall.root`：隐藏的 `CompositeRootFileSystem`，合并核心目录与运行期 mount，并发送 mount 变化事件。
-- `ideall.navigation`：只读的导航命名空间，提供 `/home`、`/activity`、`/browse`、`/apps`、`/settings` 五个目录；所有可见叶项都链接到真实目录、文件或 resource，并可在目录项上声明 `preferredEngine` 与图标 hint。它不复制 target 数据，也不把路径变成文件身份；旧 panel 只留在打开与水合兼容边界，不再是导航 target。
-- `ideall.core`：`resource-file-system` 将 Node/Blob、仍属于 core 的系统 panel/place 和 `resource-sources` 中的连接数据来源投影为 FileSystem，并在深链/水合边界兼容旧 route/resource。关注、书签和资源管理已直接使用对应 place 根；兼容 panel 设置 `navigationHidden`，不会作为真实目录的重复子项出现。Git、数据库和音频不再创建 core panel 代理文件；旧 `panel:git|database|audio` 深链与持久标签只在打开/水合边界迁移到对应 App FileSystem root。笔记、书签与文件通过对应目录的 `create` action 创建，后续读写、移动、删除与恢复均经 FileSystem；bookmarks 根另提供 `capture.bookmark` specialized action，供资讯、社区、普通外链和浏览器统一提交有界捕获输入。Node 同步、墓碑、Blob 旁存、正文 consent、乐观并发和 `save-to-mine` 语义仍由 Resource source 与底层 Node 存储的权限闸处理。UI 与活动 Engine 可读取完整 Blob，agent 读取仍受 1 MiB 上限约束。
-- `ideall.trash`：把底层墓碑投影为回收站目录，通过显式 `restore`、`purge` 和 `empty` action 提供恢复与永久删除，并转发底层更新为 `watch` 事件。单项 action 把目录快照的 `{kind,updatedAt,deletedAt}` 带到 Storage 事务内比较；`empty` 还同步冻结确认时的 `{id,kind,updatedAt,deletedAt}[]`，以确定性序列化后的 `trash-v2` SHA-256 作为根目录集合版本，并在事务内精确比较同一快照。由于根 `stat` 不为 metadata 探测枚举并摘要整个回收站，`empty` 在 action discovery 中声明为 `specialized`，只由回收站 Display 冻结集合版本并确认后调用；通用菜单不能用空版本绕过该编排。Display 点击清空时先冻结 items，再异步计算 token；计算期间的 `watch` 刷新只能更新背景列表，不能把确认数量与版本串成不同快照。目录刷新以 root target generation 和 request generation 双重判定提交资格：切换 target 的首个 render 不展示旧列表，后发读取胜出，卸载或旧 target 的迟到成功、失败和 toast 全部丢弃；同 root 读取失败保留 last-good，mutation 成败后都重新读取以收敛 Storage 真值。旧 revision 返回 conflict，不会误操作恢复后又删除的新一代 tombstone，也不会删除确认后新进入回收站的项目。
-- `remote.server`：承载 ServerPort 的 info、community、peer 和 publication 文件。常规内容读取与查询保持只读；发布和删除 publication 是经过远端写权限及 token 校验的显式 action，而不是通用 `write`。
-- 社区发布草稿不存入 `remote.server`，而是带 `社区草稿` 标签和版本化 `ideallPublicationDraft` 元数据块的普通 `note` Node。标题和正文沿用 Note 的同步、全文索引、归档与回收站链路；URL、来源 kind/id/title/version 只在本地草稿元数据中保存。来源笔记、书签或浏览捕获在生成时复制为有界快照，不与源对象保持隐式双向绑定。用户确认公开后，UI 以草稿 FileSystem version 先保存最新编辑，再只把标题、HTTP(S) URL 和正文交给 ServerPort；成功草稿改标为 `社区发布`，远端 id 与发布时间只作本地归档关联。
-- `third-party.installed-apps`：把本机已安装 App 投影到“本地应用”目录。随包 runtime extension 把 provider 与 `ideall.installed-apps` Engine/Display 在同一批次安装；极早的启动目标或点击会短暂等待该 mount，而不是永久回退。文件读取返回应用 metadata，`launch` action 通过 Tauri 启动应用；不提供 metadata 写入、`watch` 或独立窗口能力。前端只提交 opaque App id，Rust 每次从平台可信目录重新枚举并解析启动项/图标；id、canonical 路径、图片扩展和内容魔数均在原生侧校验，前端不能提交任意启动路径或图标路径。
-- `app.audio-library`：继续使用音频插件原 IndexedDB Blob，不复制媒体数据；提供播放状态、导入、导出、删除和 metadata 更新，并发送 `watch` 事件。音轨以 `audio/*` 文件供音频或预览 Engine 使用。播放状态、添加/导入、曲目 metadata 写入/删除和 manifest data-port 整库导入都经 `audio-write-adapter` 共享 `AUDIO_LIBRARY_ROOT_REF` 锁，整库替换不能夹入单曲 CAS 临界区。
-- `app.database`：每张表保留一个稳定 table JSON 文件，并挂出 rows 目录；每行都有不受排序影响的稳定 `FileRef`，可独立 `stat/read/watch/update/delete`。行 metadata 只含稳定身份/表引用，单元格正文只由 `read(rowRef)` 返回；删表会向已打开的行发送 `deleted`。表/行主键读取不扫描全库，rows 目录执行严格 cursor/limit 分页并在目录项携带安全 metadata snapshot，Display 可避免逐项 `stat`。根目录同样先把 `table,rows` 组成的扁平 entry plan 按 entry offset 分页，再只对当前页涉及的 table 去重读取 rows；每表只计算一次共享版本，最多并发 4 个快照任务，页外表不读取 rows。建表、导入、导出、删表和行 CRUD 仍通过显式 action 提供；同一个 table 文件可由数据库、Code 或 Preview Engine 渲染。表文件与 rows 目录共享完整语义版本：显式序列化 table 的身份、名称、字段顺序和时间，以及全部 row 的身份、归属、时间与字段值；row 和字段键使用确定性顺序，导入即使保留旧时间戳，只要结构或值变化也会推进 token。row 文件仍使用自身 revision 做单实体 CAS；所有 Database mutation（包括根级建表/导入、集合追加、表/行 action 与 manifest data-port 整库导入）统一经 `database-write-adapter` 进入 `DATABASE_ROOT_REF` 写锁，避免任何生产入口的全量导入穿插在实体校验与提交之间，底层 store 不反向依赖 FileSystem。根级建表/导入与集合追加仍没有单实体 CAS 语义。
-- `app.settings`：`root` 是“设置 > 基本”的真实目录，子项是 appearance、device、data、connections、runtime-extensions 五个 JSON 快照，并订阅同源状态变化发送 `watch`。`data.json` 汇总 secure-store 后端、IndexedDB v20/store 计数与持久化状态；归档导出、导入预览/确认和申请持久存储通过 specialized action 执行。设置页另提供本机派生全文索引的状态/手动重建，以及语义模型的显式下载、启停、重建和删除入口。每个公开 section 以确定性 JSON 计算 `settings-v2:<sha256>` 版本。`SettingsPage` 只经 FileSystem registry 读取和订阅；普通 JSON 状态以带版本的 CAS 文档写入，连接撤销和运行时扩展管理同样使用 specialized action。Shell 主题按钮、命令面板与兼容 Connected Apps 面板统一经 `settings-write-adapter` 调用 registry，并共享规范 section FileRef 锁。根以 `ideall.settings` Engine 渲染 `SettingsPage`。
-- `app.agent-config`：把 Agent 正在使用的设置、工作区、规则、MCP、Skills 和任务 Storage 投影为可读写 JSON 文件，并复用同一订阅源发送 `watch`。文件使用 `agent-config-v2:<sha256>` 语义版本；摘要显式绑定 section 与公开正文，workspaces 还绑定 tasks 依赖及不含密钥内容的 workspace revision，settings 绑定不含密钥内容的 configured/revision 和严格解码的 ACP 设备配置。ACP program/argv/cwd 不进入 `settings.json` 正文，但其变化会推进版本并使陈旧 action CAS 失败。默认 provider 在 settings 的首个 `stat/read/write/invoke` CAS 计算版本前等待安全存储水合，避免冷启动临时 token；摘要不包含 key 或 key hash。已水合快路径不再访问 secure-store 或发失效通知，真实 Display 的 watch 回调重读不会形成自激循环。异步摘要的带版本 watch 按源顺序排队，并在 dispose、订阅回滚或跨窗口无版本失效后抑制迟到 token。`AiSettings` 及其 MCP/Skills/Rules 管理视图、`AgentSpaces` 与 `AgentTaskList` 的读取、写入和订阅只经过 FileSystem registry；普通 JSON 状态以带版本的 CAS 文档更新，工作区创建/激活、MCP 创建/连接测试、凭据设置/清除以及 ACP 设置读取/写入/检测/连接诊断使用 specialized action。ACP 原生探测与 spawn 错误在 provider 边界收敛，不向 Display 回显本机路径或命令。Agent runtime 的 task 创建、关联、状态、收藏、删除和替换统一经 `agent-task-write-adapter`：先获取 `config:tasks` 锁，再强制刷新耐久 revision，最后调用不加锁的 `*Raw` Storage 原语。Workspace 的公开 state 与内部十进制 `_revision` 由同一次 localStorage `setItem` 提交，legacy 文档按 revision `0` 读取；secure-store mutation 必须 await 成功后才持久化公开 state 和通知，失败保留 last-good，但两个后端不被描述为一个原子事务。runtime workspace mutation 统一经 `agent-workspace-write-adapter` 按 `tasks -> workspaces` 获取锁、刷新耐久快照并调用 `*Raw`，UI 以锁内 fresh workspace updater 合并变更，不能回写陈旧整对象。provider/importer 已持规范锁时只能直接调用 Raw，避免非重入死锁；workspace 的带正文 `stat/read/write` 在两把锁内完成 prepare 与语义快照，tasks 的带正文 `stat/read` 及目录读取仍只持 tasks 锁，因此首次 legacy migration 和跨窗口刷新都不能穿过 CAS。专用 workspace 失效广播只传 scope，远端窗口收到后重读 Storage，页面 focus/pageshow/恢复可见时补查 revision。公开正文会 fail-closed 地剥离 API key、token、认证头、URL query、命令参数及 schema 外字段；MCP 创建 action 允许完整配置单向写入，但返回值不回显 secret；连接测试只传稳定 server id，由 provider 使用完整本机配置并把任意外部错误收敛为脱敏诊断。API key 只写入安全存储，UI 只读取 `configured` 布尔状态；另一个不含密钥内容的持久单调 revision 参与 settings 文件版本，每次成功 set/clear 都推进，A→B 换钥不能复用旧版本。旧复合设置对话框也经 settings FileRef 锁；manifest 整包导入对六个公开 section FileRef 去重排序、正序获取并逆序释放。普通 `fs:read` 只能枚举目录和读取不含正文指纹的安全 metadata；正文与带版本的 watch 需要 first-party 专用、默认关闭的 `agent.config:read`，UI 与精确活动 Engine 只对当前文件例外放行。Agent 显式授权后获得严格 section 枚举的 `agent.config.read` MCP tool；该 tool 只在 loopback 宿主注入 adapter 时注册，并仍通过 FileSystem registry 读取。普通 `fs:write` 不能修改配置，只有 UI、精确活动 Engine 或专用 `agent.config:write` 可写；写入/导入先无副作用地校验全部 runtime schema，端点或命令变化时不会把既有凭据恢复到新目标。
-- 外部 MCP 的运行诊断不写入上述配置正文、语义版本、归档或同步。stdio、SSE 和 Streamable HTTP 共用一个最多 256 项的本机内存投影；设置 Display 可订阅它显示连接阶段、耗时、工具数量、活动会话和最近调用，但连接 probe 仍必须经 `config:mcp` 的 specialized action 获取私密配置。诊断以公开 `updatedAt` 绑定目标，配置变化后旧状态不再展示；公开失败只含稳定分类/错误码，绝不包含 URL、命令参数、header、凭据、工具参数或返回正文。
-- `runtime-extension.<id>`：已授权签名 MCP connector 的临时只读 FileSystem。根目录按 manifest 权限只出现 resources/tools；激活时有限分页并拒绝重复身份/cursor 环，资源与工具 FileRef 使用私密 URI/原名的 SHA-256。目录项和实时搜索只投影标题、描述、媒体类型、来源与风险等授权 metadata，不持久化 URI、cursor 或正文；撤销/卸载随 runtime mount 原子消失。`resources/read` 只在打开具体文件时发生并有 3 MiB 上限。工具文件声明带版本的通用 `mcp.invoke` action；复杂 schema 降级为有界 JSON 输入，所有调用在副作用前先经审计 FileSystem 写 pending，并在明确回执后结算。provider 只允许 UI 与精确活动 Engine 读取、只允许 UI action，不会把连接器能力隐式授予 Agent/embed。
-- Agent 公开 codec 的 URL 规则按字段区分：settings/workspace baseURL 只允许 HTTP(S)，canonicalize 后清除 userinfo、query 与 fragment；MCP URL、headers、env 保留连接结构和 `${NAME}` 引用，但清空内嵌认证值，命令 args 与 schema 外字段 fail closed。Workspace secure entry 使用 `{version:2,target,apiKey,revision}` record 与 `{target:null,apiKey:""}` 墓碑；record revision 绑定下一次公开 envelope。secure target 和 UI expected target 复用同一 canonicalizer，只有 target 匹配且 record revision 不超前时才加载 key；超前记录表示 secure-first 后公开提交中断，跨重载也 fail closed，并以墓碑完成 intended revision。target mismatch、旧 v1/裸 secure 值、任意 revision 的明文字段及 URL 规范化都在 `tasks -> workspaces` 锁内迁移；损坏正文中的合法 raw revision 仍作为覆盖写的单调 floor。64 位 revision 耗尽时只有真实写入/修复被拒绝，no-op 不取下一 revision。诊断修复通过 owner `repairMutation/applyRepair` 进入同一锁和 force Raw 提交，即使正文相同也覆盖坏 token。Workspace 文本控件使用单尾串行 generation 草稿队列，以 value+source revision 收敛 ABA；`keep` 失败项只由后续显式 flush 重试，跨 await 的生成操作必须校验 workspace/generation token。模型直接选择等待 baseURL/model/API key 草稿全部 settle，并以 selection generation 保证最后意图胜出。API key 提交必须先 flush baseURL，且不得越过 expected-target 校验。
-- `nodes` 的默认尾部追加继续使用 v16 引入的 `[kind,sortKey]` covering index；数据库 v17 另增加 `[kind,sortKey,title,id]` 覆盖索引，常用 Node 目录可按稳定 cursor 读取有界摘要页，不先 clone 全部正文。v18 增加 `local_search_index` 派生仓；UI 搜索查询轻量投影，精确 Node 事件增量重读，未知范围失效或 schema 不匹配时从 FileSystem 完整重建。v20 增加 `local_semantic_index`：只有用户显式下载固定 E5 q8 模型并构建后才启用；Worker 离线生成 384 维向量，查询以 reciprocal-rank fusion 保持标题命中优先、正文命中其次、语义结果补充。向量逐项绑定全文投影的 `sourceVersion`；数量、模型或版本不一致时整组语义结果 fail closed，统一退回全文索引。两类索引都不改变源数据，也不进入同步或归档。folder、bookmark、file、feed、note 与 thread 的新增仍在现有 readwrite 事务内反向 seek kind 全局上界并 `add`。快速捕获书签在同一个 `nodes` readwrite 事务内读取 bookmark kind、按保留 query/忽略 hash 的 canonical URL 查重，再决定返回 existing 或追加；并发窗口不能在查询与创建之间插入第二份。文件把 Blob 写入放进同一 `[blobs,nodes]` 事务；关注、笔记以及“收藏夹 + 书签”同步分别把 fresh 快照、完整逻辑快照 CAS、批量写回、tombstone GC 和本机恢复快照生命周期放进同一 `[nodes,trash_snapshots]` 事务。同步新 id 使用 `add`，不能覆盖同主键其它 kind。显式插入和笔记/书签树移动仍需 sibling 快照，但校验、候选拓扑、同级键计算和写入都与快照放在同一个事务内。
-- 笔记和书签树同样保留 Storage 的事务语义：move 的活跃父节点/循环校验、候选拓扑与同级键写入不能拆分；笔记子树、单书签和收藏夹删除把最新节点快照与全部 tombstone 放进同一个 `[nodes,trash_snapshots]` 事务。包含 `parentId` 的笔记/书签 `fs.write` 会在该事务内同时应用字段补丁，父级未变时不重排；失败与通知分别遵循整体回滚和 commit 后发布。
-- 文件删除在一个 `[blobs,nodes,trash_snapshots]` 事务内 fresh-read，原子写快照与 tombstone 并移除 Blob；文件正文更新也在写事务内重读活跃节点，不会与删除竞态后复活。
-- 笔记子树恢复在一个事务内重读当前删除子树、校验快照身份、修复父链、恢复全部节点并删除快照；失败时不会留下“父 tombstone、子 live”。回收站单项恢复、purge 和 empty 同样使用覆盖 `nodes/blobs/trash_snapshots` 的单事务，失败不可部分生效，通知只在 commit 后发布。
-- 普通 Node mutation 也遵循“预读快照就是提交基线”：Resource FileSystem 将 `expectedVersion` 校验后的 `{kind,updatedAt,deletedAt}` 继续传到 note/bookmark/folder/file/feed/thread 的 Storage 写事务；action 则从 `invoke` options 取得调用方展示版本。事务内 fresh value 不匹配时统一映射为 `conflict`，missing 与 tombstone 不会被修改。字段编辑、移动、Blob 写入与恢复直接返回事务实际提交的 Node，再投影为 `ResourceRecord`；删除返回明确 receipt，Resource FileSystem 不在提交后再次 stat/get。thread 字段补丁在 `nodes/agent_tasks` 共享事务内应用到 fresh thread，不会以旧整篇快照覆盖并发更新。
-- task/thread 是 FileSystem 外观下需要跨记录原子性的 Storage 特例：`ThreadTaskStoragePort` 只声明窄事务能力，core 组合适配器把它注入同一 IndexedDB 的 `nodes`、`agent_tasks` 与 `trash_snapshots` store。创建 task thread、保存正文并刷新任务时间、删除并捕获回收站快照都在单一事务中完成；普通单文件 CRUD 仍经 FileSystem registry。所有可能推进 task revision 的通用 node/thread `write` 与非 `open` action 在 provider 外层固定按 `config:tasks -> thread FileRef` 获取锁；task adapter 已持 tasks 锁时只调用直达跨 store 事务的 Raw 原语，不再回调 thread provider。`agent_tasks` 的 state 原子维护 `revision/count`：高频写通过 state 与 `task:<id>` 主键点读，revision 同时承担跨窗口恢复和 CAS。普通/Task Thread 复用上述节点尾键原语，任务关系与节点新增仍在同一事务。BroadcastChannel 只传 `{kind,id}` 失效信号，不携带任务、序号或会话内容；接收窗口先读取耐久索引头，只有 revision/count 变化才重载完整快照，并在页面恢复可见时补做校验。
-- `config:tasks` 同时提供 JSON 兼容读取与目录投影。每个目录项显式链接 `threadRef`，只携带 task/workspace/status/updatedAt 安全属性；任务按更新时间倒序分页，cursor 与任务版本绑定，数据变化后的旧 cursor 返回冲突。Display 每页固定最多 64 项，只为当前页执行一次 `statMany` 并共享一条 Home collection watcher；精确 `changes` 只点查命中的当前页线程，缺失或畸形变更明细才回退整页。`ideall.core` 的 thread metadata 读取使用 IndexedDB compound covering index，少量 id 点查、超大批次单次扫描，均不 structured-clone `messages`。5000 项上限由 codec、Storage、provider 与 Display 共同执行；workspace 文件只投影派生的 `taskCount`，空间列表不再读取任务正文。任务创建、正文保存、索引更新时间、删除标记与回收站快照由同一 IndexedDB 事务提交，失败时整体回滚且不发布半完成快照。runtime mutation 在 tasks 锁内先执行强制耐久刷新，跨窗口旧缓存不会把 status/star/touch 误判为 no-op；旧 localStorage 迁移也只能从 locked prepare/refresh 进入。
-- `app.git-repositories`：只挂载用户通过原生目录选择器授权的仓库。持久化 mount 为 `{ id, grantId, path }`；其中 path 仅用于展示，随机 mount id 用于 `FileRef`，bearer grantId 只在 provider 内解析原生授权。旧版字符串路径与导入数据会保留为未授权记录，必须重新选择目录，不能隐式恢复访问。provider 暴露仓库目录和真实子文件，提供文本读写、乐观并发、`watch`，以及 fetch、pull、push、branch、commit 和移除挂载等 Git action；仓库根版本是 branch/upstream/files/log/remotes/diff/status 加全部 heads、remote-tracking refs 与 tags 的 SHA-256 语义摘要，不采用不会随 `.git` 或既有子文件变化推进的目录 inode token。仓库 mutation 与应用内子文件写入共享 repo-root 写锁；action 会在锁内重新解析授权、重读快照并校验版本。挂载列表的 mount/delete/data-port import 另共享 Git 根锁，整表导入同时按稳定顺序固定当前 repo refs，使等待中的 action 在导入后重新解析目标而不能命中已卸载 FileRef。
-- `app.display`：Engine 关联（mimeapps.list 形状）的 config 类投影。root 下的 `engines.json` 汇总三个工作区 scope 的默认关联与 Removed Associations；localStorage 仍是物理真相（`engines/preferences` 领域 store），文件是同一 store 的 CAS 投影（settings appearance 同模式）。完整文档写走 `display-engine-associations-v1:<sha256>` CAS 并按 scope diff 提交（单 scope 变更 = 单一 setItem，不承诺跨 scope 原子）；单条变更经 `preferences.setFileDefault` / `setMediaTypeDefault` / `removeAssociation` / `restoreAssociation` 四个带 schema 的 invoke action。读 = `ui` / `fs:read` / engine activeFile 精确匹配；写 = `ui` / engine activeFile / `display.engines:write`——该权限位有意不进 embed `PERMISSIONS`（同 `agent.config:write` 先例），agent/embed 的任何 grant 都拿不到。watch 经 `storage` 事件过滤三个偏好键加 provider 写后精确通知。EnginePicker 等 UI 写一律经 write-adapter 回 provider，与文件写共用同一把 FileRef 锁。
-- `app.engines`：Engine 描述符的只读投影（Desktop Entry 系统层类比）。root 目录按 `engineRegistry` 当前内容列出每个引擎一个 `<engineId>.json`；`read` 返回 `{ version: 1, descriptor }`——descriptor 全量公开元数据（engineId/label/match/priority/layout/access/iconHint），不含 renderer 代码；版本 `display-engine-descriptors-v1:<sha256>`。watch 由 `engineRegistry.subscribe` 驱动（注册 created / 注销 deleted / 替换 changed，首末 watcher 惰性建立源订阅）。`write`/`invoke` 一律 `unsupported`：renderer 注册仍只能经组合根 / 签名 runtime-extension 管线，文件投影绝不构成第二注册通道。读 = `ui` / `fs:read` / engine activeFile 精确匹配，agent 经普通 `fs:read` 可枚举引擎面。
+## Display
 
-管理 Display 的数据访问已经统一：`SettingsPage`、`AiSettings`（含 ACP、MCP、Skills、Rules）、`AgentSpaces`、`AgentTaskList` 的读取、写入与订阅全部经 FileSystem registry。普通 JSON 状态采用带版本的 CAS 文档；连接、运行时扩展、工作区、ACP/MCP 创建或探测和凭据操作使用 specialized action，由 provider 保留底层 Storage 的事务、权限与安全存储语义。Display 不直接导入 backing store，也不复制 Storage 状态。
+Display 是短生命周期投影，不是数据权威：
 
-活动栏、桌面与移动目录树、本地搜索、Home 汇总以及笔记、书签、文件、订阅和回收站管理界面只调用 FileSystem registry。兼容 `FilesPort` 的普通 CRUD 也通过 registry 分派到 `ideall.core`；update/move/delete 的 `expectedVersion` 沿端口继续下沉到 Storage transaction CAS。只有同步所需的 tombstone 全量读取、完整逻辑快照 CAS 和原子 bulk 写入收口在独立 `StorageSyncPort`，其返回值是 Storage 规范化后的实际提交快照。ESLint 对 `app/shell/workspace/modules/shared/ui` 禁止直接导入 store 或 Resource source registry；`src/filesystem/resource-sources` 只保留 FileSystem 内部的来源适配，`src/files/stores` 只保留 provider 存储实现及同步适配器。Agent 审计 Display 同样只经 `app.agent-write-audit` 的 `read/watch` 读取审计文档，append/complete 只经 specialized action 进入 provider，不直连 IndexedDB store。
+- GPUI Entity 持有选择、焦点、展开状态和未提交草稿；
+- application service 提供用例和持久化结果；
+- 数据库、网络、同步与 Agent 工作在后台；
+- 后台任务通过受控任务返回 GPUI executor，不能直接跨线程修改 Entity。
 
-`app.agent-write-audit` 把 v19 引入、当前 IndexedDB v20 中最多 1,000 条 Agent 写入回执投影为本机只读 JSON 文件，以 `ideall.agent-write-audit` Engine 在“活动 / 审计”渲染。聊天面板与 ACP runtime 对每个获批 mutating tool 先 append 固定 allowlist 的 `pending` 意图，落盘失败则不执行；明确工具回执再用同一 IndexedDB 事务把该 id 从 pending 一次性结算为 `committed` 或 `failed`。transport 异常、应用崩溃或结算失败保留 pending 供人工核对，运行时不得重放。容量裁剪只删除最旧终态；全为 pending 时拒绝新意图。输入不包含原始工具参数、AI 正文、表单值、认证信息或 URL query。该日志不进入 Agent 配置导出或跨端同步，本地变更通过 provider watch 与 BroadcastChannel 跨窗口失效。
+桌面布局固定为“侧边导航栏 → 纵向活动/文件树 → 标签内容区”。活动栏只负责树形浏览和节点
+操作；Editor/Preview/Browser 在内容区切换。移动端使用导航栈和底部栏，不照搬桌面三栏。
 
-## 运行时扩展边界
+## Agent 边界
 
-- `RuntimeExtensionCatalog` 是唯一激活入口：随包扩展走 builtin 信任路径，package 必须依次完成宿主注入的 `verify -> consent/restore -> activate`。桌面 composition root 必须在首次 package 验证前通过 `configureRuntimeExtensionTrustHost` 一次性绑定 verifier，运行中不能更换信任根；未配置 verifier 时 fail closed。Catalog 私有签发一次性、按 extension id 绑定的内存 permit，`RuntimeExtensionRegistry` 拒绝任何绕过 Catalog 的直接安装。
-- 持久化只在公开 localStorage 保存严格 v2 安装记录 `{ id, version, digest, permissionDigest, consentReceipt }`，不保存 factory、完整 receipt 或可执行代码。桌面缺省 consent authority 将完整 receipt 写入系统凭据库并读回验证；Web 不降级授权。hydrate 对大小、字段、数量和重复 id 严格校验，package receipt 必须在当前来源再次验证后由 authority 恢复，并逐字段绑定 descriptor；未知来源只显示为 unavailable，不会执行。并发 authorize 共享同一 verifier/consent 操作，卸载会使在途 consent 失效并撤销迟到 receipt。
-- 激活前会对 Engine descriptor/matcher/renderer 做完整 runtime 白名单校验；随后先启动 connector 生命周期，再在同一 notification batch 中原子挂载 FileSystem 与成对的 Engine descriptor/renderer。卸载、撤销或 factory 移除会先 abort 并等待在途 activation，再调用生命周期 disposer，最后逆序注销宿主贡献；清理失败进入可诊断 quarantine，可重试且不会与新实例重叠。撤销始终先让运行时失效；系统凭据删除失败则保留最小绑定引用并进入 `revocation-failed`，只允许重试撤销，避免丢失唯一清理句柄。设置页展示来源、权限、验证方/时间、授权恢复状态、失败与待清理资源，并为 package 提供验证授权、启用/重试、撤销和确认卸载；随发行物提供的 mandatory builtin 只允许故障重试。
-- `ideall.settings` 与 `ideall.agent-config` 都由 composition root 发现为随包 builtin runtime extension 并默认激活。前者把 `app.settings` provider/mount 与 `ideall.settings` Engine/Display 放在一个安装批次；后者把 `app.agent-config`、`app.agent-write-audit` 两个 provider/mount 与 `ideall.agent-settings`、`ideall.agent-spaces`、`ideall.agent-tasks`、`ideall.agent-write-audit` 四组 Engine/Display 放在一个安装批次。任一贡献失败都会逆序回滚，不暴露只有 provider 或只有 renderer 的半安装状态。
-- 本机已安装 App 已通过 `third-party.installed-apps` 文件系统、专用 Engine 和统一 `launch` action 形成完整链路。任意第三方 App 的内部数据仍需它自己的授权 connector/provider；宿主不会因为能启动一个 App 就推断拥有其数据访问权。
+Agent 只能通过 Grant 后的 MCP/FileSystem 能力访问数据。写操作先建立最小、脱敏的 pending
+审计，再执行 mutation 并结算结果；不记录原始密钥、完整工具参数或无关正文。外部 ACP
+Agent 是用户主动启动的系统进程，不等同于 OS 沙箱。
 
-## Guarded FS 信任边界
+## 依赖位置
 
-- Git provider 通过 `src/lib/guarded-fs.ts` 调用 Tauri 原生命令访问仓库文件。TypeScript adapter 负责协议转换，不是安全边界。
-- `main` 窗口是唯一获准调用 guarded FS 命令的窗口，且 grant 只能由 Rust 侧 Tauri dialog plugin 的原生目录选择器创建。前端不能向任何 guarded 命令传 root；独立 Engine 窗口也没有这些 Tauri capability。
-- Rust 将 opaque UUID `grantId` 映射到 canonical root，并在 App 数据目录持久化；恢复和每次访问都会校验 root 的平台文件 identity，目录被替换后 grant 失效。撤销 mount 同时撤销原生 grant。
-- stat/list/read/write 只接受 `grantId + entryId`（root 的 entryId 为空）。Unix entryId 使用 device/inode，Windows 使用 volume serial/file index；路径和名称不进入 `FileRef`。rename 后 identity 保持不变，缓存失效时 Rust 只在 grant 内进行有界扫描来重新定位。
-- 解析目标时始终 canonicalize 并要求仍位于 grant root 内；目录枚举和 identity 扫描跳过 `.git`、指向 `.git` 的别名、symlink 逃逸与不支持条目。`list` 返回 canonical relative 作为展示 metadata，不能作为后续访问参数。read/write 在打开文件句柄后再次核对平台 identity，版本校验和 I/O 均使用该句柄，关闭路径替换的 TOCTOU 窗口。
-- 原生层限制单次读取范围为 32 MiB、文本写入为 16 MiB。文件版本由修改时间与长度组成，`expectedVersion` 不匹配时返回冲突，避免静默覆盖并发修改。
+- 契约：`native/crates/ideall-protocol`
+- Engine/Workspace 规则：`native/crates/ideall-domain`
+- FileSystem 用例：`native/crates/ideall-application`
+- SQLite：`native/crates/ideall-storage`
+- 桌面组合：`native/apps/ideall-desktop`
+- 移动组合：`native/apps/ideall-mobile`
 
-## 安全不变量
-
-- note/thread 正文、Blob 和远端写入继续经过各自既有权限闸；公开 metadata 不得绕过正文 consent 或二进制读取权限。
-- provider 的写入和 destructive action 必须校验声明的 permission、intent 及来源约束；文件 capability 和 UI 可见性不能代替此校验。
-- 远端、第三方 App、插件 IndexedDB 与本地磁盘各自保留存储边界。`save-to-mine` 是支持该 capability 的来源所提供的显式本地投影，不是所有只读来源的隐式写入路径。
-- 独立窗口、guarded FS 与远端 action 的边界分别由 Tauri capability、Rust 路径约束和 provider 授权共同执行，不能由 Display 层放宽。
+旧 TypeScript provider、Tauri capability 与 WebView bridge 只存在于
+`legacy/tauri-v2`，不再是默认分支的实现参考。

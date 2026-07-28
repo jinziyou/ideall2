@@ -1,0 +1,25 @@
+[package]
+name = "ideall-updater"
+description = "Signed, bounded native desktop update client for ideall"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+base64.workspace = true
+minisign-verify = "=0.2.5"
+percent-encoding.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+ureq.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true

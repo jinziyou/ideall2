@@ -1,0 +1,46 @@
+[package]
+name = "ideall-mobile"
+description = "gpui-mobile application for ideall on iOS and Android"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[features]
+default = ["mobile-runtime"]
+mobile-runtime = ["dep:gpui-mobile"]
+mobile-ui-host-check = ["mobile-runtime"]
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+ideall-application = { path = "../../crates/ideall-application" }
+ideall-domain = { path = "../../crates/ideall-domain" }
+ideall-presentation = { path = "../../crates/ideall-presentation" }
+ideall-protocol = { path = "../../crates/ideall-protocol" }
+ideall-secrets = { path = "../../crates/ideall-secrets" }
+ideall-sync = { path = "../../crates/ideall-sync" }
+ideall-sync-http = { path = "../../crates/ideall-sync-http" }
+log = "0.4"
+serde_json.workspace = true
+unicode-segmentation.workspace = true
+# The vendored gpui-mobile revision's iOS platform-view factory references its camera
+# and video modules unconditionally. Keep those package features enabled until
+# the upstream factory applies matching cfg gates; ideall does not register
+# camera/video renderers.
+gpui-mobile = { path = "../../vendor/gpui-mobile", optional = true, default-features = false, features = ["camera", "clipboard", "deeplink", "file_selector", "path_provider", "share", "shared_preferences", "url_launcher", "video_player", "webview"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-activity = { version = "0.6", features = ["native-activity"] }
+android_logger = "0.15"
+jni = "0.22"
+# GPUI's font-kit dependency is compiled but not used by the Android platform
+# text system. Select its dynamic Fontconfig backend so Android builds do not
+# cross-link the Linux host's Fontconfig library.
+zed-font-kit = { git = "https://github.com/zed-industries/font-kit", rev = "94b0f28166665e8fd2f53ff6d268a14955c82269", package = "zed-font-kit", version = "0.14.1-zed", default-features = false, features = ["source-fontconfig-dlopen"] }
+
+[lints]
+workspace = true

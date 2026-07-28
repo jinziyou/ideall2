@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   quality:
-    name: quality
+    name: Repository metadata and scripts
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -25,35 +25,5 @@ jobs:
       - uses: ./.github/actions/setup-js
       - name: Run quality checks
         run: pnpm verify:checks
-      - name: Upload core coverage
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: core-coverage
-          path: node_modules/.cache/ideall/coverage
-          if-no-files-found: ignore
-          retention-days: 7
 
-  build:
-    name: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-js
-      - name: Restore Next cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .next/cache
-          key: ${{ runner.os }}-next-${{ hashFiles('pnpm-lock.yaml') }}-${{ hashFiles('src/**', 'public/**', 'next.config.ts', 'tsconfig.json', 'package.json') }}
-          restore-keys: |
-            ${{ runner.os }}-next-${{ hashFiles('pnpm-lock.yaml') }}-
-            ${{ runner.os }}-next-
-      - name: Build
-        run: pnpm app:export
-
-# 另两道门拆在独立工作流 (带 paths 过滤, 省 CI 分钟数):
-#   rust.yml  — clippy 零警告 + cargo test (仅 src-tauri/** 改动时跑)
-#   smoke.yml — 真浏览器冒烟, 测静态导出生产形态 (仅应用面改动时跑)
+# GPUI App 的编译、测试、打包和五平台门禁统一由 rust.yml / native-release.yml 承担。

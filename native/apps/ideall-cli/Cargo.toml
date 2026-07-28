@@ -1,0 +1,23 @@
+[package]
+name = "ideall-cli"
+description = "Native ideall database doctor and workspace migration CLI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+base64.workspace = true
+clap.workspace = true
+ideall-acp = { path = "../../crates/ideall-acp" }
+ideall-agent = { path = "../../crates/ideall-agent" }
+ideall-application = { path = "../../crates/ideall-application" }
+ideall-storage = { path = "../../crates/ideall-storage" }
+ideall-sync-http = { path = "../../crates/ideall-sync-http" }
+ideall-updater = { path = "../../crates/ideall-updater" }
+minisign.workspace = true
+
+[lints]
+workspace = true

@@ -1,16 +1,21 @@
 name: rust
 
-# Rust 门 (src-tauri): Linux 跑 rustfmt + clippy + 全量测试；Windows/macOS 低成本编译全部 targets。
-# paths 过滤: 仅 src-tauri 改动才跑 (省 CI 分钟数; 首跑冷缓存 ~7min, rust-cache 后显著缩短)。
+# Rust 门：GPUI 原生工作区是唯一生产 App 实现。
 on:
   pull_request:
     paths:
-      - "src-tauri/**"
+      - "native/**"
+      - "package.json"
+      - ".github/actions/setup-cargo-ndk/**"
+      - ".github/actions/setup-xcodegen/**"
       - ".github/workflows/rust.yml"
   push:
     branches: [main, dev]
     paths:
-      - "src-tauri/**"
+      - "native/**"
+      - "package.json"
+      - ".github/actions/setup-cargo-ndk/**"
+      - ".github/actions/setup-xcodegen/**"
       - ".github/workflows/rust.yml"
   workflow_dispatch:
 
@@ -22,42 +27,129 @@ permissions:
   contents: read
 
 jobs:
-  rust:
-    name: cargo fmt + check + clippy + test
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+  changes:
+    name: Resolve platform scope
+    runs-on: ubuntu-22.04
+    outputs:
+      desktop: ${{ steps.scope.outputs.desktop }}
+      mobile: ${{ steps.scope.outputs.mobile }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: scope
+        name: Classify changed paths
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          desktop=true
+          mobile=true
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+            desktop=false
+            mobile=false
+            if grep -Eq '^(\.github/workflows/rust\.yml|package\.json|native/(Cargo\.(toml|lock)|rust-toolchain\.toml|updater-public-key\.txt|THIRD_PARTY_LICENSES\.md|crates/|apps/ideall-desktop/|scripts/(package-desktop|verify-artifact|verify-linux-binary)))' <<<"$changed"; then
+              desktop=true
+            fi
+            if grep -Eq '^(\.github/workflows/rust\.yml|package\.json|\.github/actions/(setup-cargo-ndk|setup-xcodegen)/|native/(Cargo\.(toml|lock)|rust-toolchain\.toml|updater-public-key\.txt|crates/|apps/ideall-mobile/|vendor/gpui-mobile/|scripts/(smoke-android|smoke-ios|verify-artifact|verify-gpui-mobile)))' <<<"$changed"; then
+              mobile=true
+            fi
+          fi
+          echo "desktop=$desktop" >> "$GITHUB_OUTPUT"
+          echo "mobile=$mobile" >> "$GITHUB_OUTPUT"
+
+  native:
+    name: native fmt + check + clippy + test
+    needs: changes
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - name: Install Linux WebKit deps
+      - name: Verify gpui-mobile upstream provenance
+        if: needs.changes.outputs.mobile == 'true'
+        run: bash native/scripts/verify-gpui-mobile-vendor.sh --upstream
+      - name: Install GPUI Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libfontconfig1-dev libfreetype6-dev libxcb1-dev libxkbcommon-x11-dev libvulkan-dev
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
+          toolchain: 1.96.0
           components: clippy,rustfmt
       - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          workspaces: ./src-tauri -> target
-      # tauri::generate_context! 编译期嵌入 frontendDist(../out) 资产; 此 job 不构建前端, 给空目录即可编译。
-      - name: Stub frontend dist
-        run: mkdir -p out
+          workspaces: ./native -> target
       - name: Format
         run: cargo fmt --all -- --check
-        working-directory: src-tauri
-      - name: Check
-        run: cargo check --all-targets
-        working-directory: src-tauri
-      - name: Clippy (警告即失败)
-        run: cargo clippy --all-targets -- -D warnings
-        working-directory: src-tauri
-      - name: Test
-        run: cargo test
-        working-directory: src-tauri
+        working-directory: native
+      - name: Check workspace
+        run: cargo check --locked --workspace --all-targets
+        working-directory: native
+      - name: Check real gpui-mobile UI on host
+        run: cargo check --locked -p ideall-mobile --features mobile-ui-host-check
+        working-directory: native
+      - name: Clippy (warnings are errors)
+        run: cargo clippy --locked --workspace --all-targets --exclude ideall-mobile -- -D warnings
+        working-directory: native
+      - name: Clippy gpui-mobile UI (warnings are errors)
+        run: cargo clippy --locked -p ideall-mobile --features mobile-ui-host-check -- -D warnings
+        working-directory: native
+      - name: Test workspace
+        run: cargo test --locked --workspace
+        working-directory: native
 
-  platform-check:
-    name: cargo check (${{ matrix.name }})
+  native-linux-preview:
+    name: native desktop (linux)
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install GPUI Linux packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libfreetype6-dev libxcb1-dev libxkbcommon-x11-dev libvulkan-dev rpm
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.96.0
+      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: ./native -> target
+      - name: Build and package native Linux preview
+        run: |
+          cargo build --locked --release -p ideall-desktop
+          bash scripts/verify-linux-binary.sh target/release/ideall-desktop 2.35
+          bash scripts/package-desktop.sh
+          for artifact in target/native-packages/*.tar.gz target/native-packages/*.deb target/native-packages/*.rpm; do
+            bash scripts/verify-artifact.sh desktop "$artifact"
+          done
+          (cd target/native-packages && sha256sum -c SHA256SUMS)
+        working-directory: native
+      - name: Upload native Linux preview
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ideall-native-linux-x86_64
+          path: |
+            native/target/native-packages/*.tar.gz
+            native/target/native-packages/*.deb
+            native/target/native-packages/*.rpm
+            native/target/native-packages/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+  native-desktop-platforms:
+    name: native desktop (${{ matrix.name }})
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -67,19 +159,205 @@ jobs:
           - name: macos
             os: macos-15
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.96.0
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        if: matrix.name == 'windows'
+        with:
+          dotnet-version: 8.0.x
       - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          workspaces: ./src-tauri -> target
-      # tauri::generate_context! 在所有宿主平台都会读取 frontendDist=../out。
-      - name: Stub frontend dist
+          workspaces: ./native -> target
+      - name: Install Windows packaging tools
+        if: matrix.name == 'windows'
+        shell: pwsh
+        run: |
+          choco install nsis --version=3.12.0 -y --no-progress
+          dotnet tool restore
+        working-directory: native
+      - name: Check native desktop
+        run: cargo check --locked -p ideall-desktop --all-targets
+        working-directory: native
+      - name: Build and package native desktop preview
         shell: bash
-        run: mkdir -p out
-      - name: Check all targets
-        run: cargo check --all-targets
-        working-directory: src-tauri
+        run: |
+          cargo build --locked --release -p ideall-desktop
+          bash scripts/package-desktop.sh
+          artifacts=(target/native-packages/*.zip)
+          if [[ "${{ matrix.name }}" == "windows" ]]; then
+            artifacts+=(target/native-packages/*.msi target/native-packages/*-setup.exe)
+          else
+            artifacts+=(target/native-packages/*.dmg)
+          fi
+          for artifact in "${artifacts[@]}"; do
+            bash scripts/verify-artifact.sh desktop "$artifact"
+          done
+        working-directory: native
+      - name: Upload native desktop preview
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ideall-native-${{ matrix.name }}
+          path: |
+            native/target/native-packages/*.zip
+            native/target/native-packages/*.dmg
+            native/target/native-packages/*.msi
+            native/target/native-packages/*-setup.exe
+            native/target/native-packages/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+  native-android:
+    name: native Android APK and emulator smoke
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 100
+    env:
+      ANDROID_NDK_VERSION: 26.1.10909125
+      IDEALL_ANDROID_ABIS: arm64-v8a,x86_64
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+      - name: Resolve Android NDK path
+        id: android-ndk
+        shell: bash
+        run: echo "path=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_OUTPUT"
+      - name: Restore Android NDK
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.android-ndk.outputs.path }}
+          key: ${{ runner.os }}-android-ndk-${{ env.ANDROID_NDK_VERSION }}
+      - name: Install Android SDK and NDK
+        env:
+          NDK_HOME: ${{ steps.android-ndk.outputs.path }}
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          if [[ ! -d "$NDK_HOME" ]]; then
+            sdkmanager "ndk;$ANDROID_NDK_VERSION"
+          fi
+      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          gradle-version: "8.9"
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.96.0
+          targets: aarch64-linux-android,x86_64-linux-android
+      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: ./native -> target
+      - uses: ./.github/actions/setup-cargo-ndk
+      - name: Build Rust library, release APK and AAB
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+          bash apps/ideall-mobile/build-mobile.sh android release
+          gradle -p apps/ideall-mobile/platforms/android :app:bundleRelease
+          gradle -p apps/ideall-mobile/platforms/android :app:assembleDebug
+          for artifact in apps/ideall-mobile/platforms/android/app/build/outputs/apk/release/*.apk; do
+            bash scripts/verify-artifact.sh android-apk "$artifact"
+            unzip -Z1 "$artifact" | grep -E '^lib/x86_64/libideall_mobile\.so$' >/dev/null
+          done
+          for artifact in apps/ideall-mobile/platforms/android/app/build/outputs/apk/debug/*.apk; do
+            bash scripts/verify-artifact.sh android-apk "$artifact"
+            unzip -Z1 "$artifact" | grep -E '^lib/x86_64/libideall_mobile\.so$' >/dev/null
+          done
+          for artifact in apps/ideall-mobile/platforms/android/app/build/outputs/bundle/release/*.aab; do
+            bash scripts/verify-artifact.sh android-aab "$artifact"
+          done
+        working-directory: native
+      - name: Enable KVM for the emulator
+        run: |
+          if [[ -e /dev/kvm ]]; then
+            sudo chmod 666 /dev/kvm
+          fi
+      - name: Install and launch the real APK on Android Emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disk-size: 2048M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            test "$(find native/apps/ideall-mobile/platforms/android/app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | wc -l)" -eq 1
+            bash native/scripts/smoke-android-emulator.sh "$(find native/apps/ideall-mobile/platforms/android/app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print -quit)"
+      - name: Upload Android preview APK and AAB
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ideall-native-android-arm64
+          path: |
+            native/apps/ideall-mobile/platforms/android/app/build/outputs/apk/debug/*.apk
+            native/apps/ideall-mobile/platforms/android/app/build/outputs/bundle/release/*.aab
+            ${{ runner.temp }}/ideall-android-smoke.png
+            ${{ runner.temp }}/ideall-android-window.xml
+          if-no-files-found: error
+          retention-days: 14
+
+  native-ios:
+    name: native iOS simulator
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: macos-15
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.96.0
+          targets: aarch64-apple-ios-sim
+      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: ./native -> target
+      - uses: ./.github/actions/setup-xcodegen
+      - name: Configure simulator diagnostics
+        shell: bash
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" || "$GITHUB_RUN_ATTEMPT" -gt 1 ]]; then
+            echo "CARGO_PROFILE_RELEASE_DEBUG=1" >> "$GITHUB_ENV"
+            echo "CARGO_PROFILE_RELEASE_STRIP=false" >> "$GITHUB_ENV"
+            echo "iOS diagnostic symbols enabled"
+          else
+            echo "CARGO_PROFILE_RELEASE_DEBUG=0" >> "$GITHUB_ENV"
+            echo "CARGO_PROFILE_RELEASE_STRIP=true" >> "$GITHUB_ENV"
+            echo "iOS fast smoke profile enabled"
+          fi
+      - name: Build simulator application
+        run: |
+          bash apps/ideall-mobile/build-mobile.sh ios-simulator release
+          bash scripts/verify-artifact.sh ios-app apps/ideall-mobile/platforms/ios/build/Build/Products/Release-iphonesimulator/ideall.app
+        working-directory: native
+      - name: Run interactive iOS XCTest smoke
+        env:
+          IDEALL_IOS_RESULT_BUNDLE: ${{ runner.temp }}/ideall-ios-smoke-${{ github.run_id }}-${{ github.run_attempt }}.xcresult
+        run: bash scripts/smoke-ios-simulator.sh
+        working-directory: native
+      - name: Upload failed iOS smoke diagnostics
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ideall-native-ios-smoke-diagnostics
+          path: ${{ runner.temp }}/ideall-ios-smoke-${{ github.run_id }}-${{ github.run_attempt }}.xcresult
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Upload iOS simulator preview
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ideall-native-ios-simulator-arm64
+          path: native/apps/ideall-mobile/platforms/ios/build/Build/Products/Release-iphonesimulator/ideall.app
+          if-no-files-found: error
+          retention-days: 14

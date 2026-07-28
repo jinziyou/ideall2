@@ -2,7 +2,7 @@
 /** 一次性配置本仓库 fetch refspec, 永久避免 app-edge 等移动标签冲突。 */
 import { fileURLToPath } from "node:url"
 import path from "node:path"
-import { ensureMovingTagFetchRefspecs } from "./git-fetch-config.mjs"
+import { ensureMovingTagFetchRefspecs } from "./lib/git-fetch-config.mjs"
 
 const HELP = `用法:
   pnpm git:setup

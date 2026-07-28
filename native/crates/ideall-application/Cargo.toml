@@ -1,0 +1,28 @@
+[package]
+name = "ideall-application"
+description = "UI-independent native ideall use cases"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+ideall-agent = { path = "../ideall-agent" }
+ideall-domain = { path = "../ideall-domain" }
+ideall-protocol = { path = "../ideall-protocol" }
+ideall-storage = { path = "../ideall-storage" }
+ideall-sync = { path = "../ideall-sync" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+url.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "ideall-agent"
+description = "Grant authorization and redacted Agent audit contracts for ideall"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+ideall-protocol = { path = "../ideall-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ureq.workspace = true
+url.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

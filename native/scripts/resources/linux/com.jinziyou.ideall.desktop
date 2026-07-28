@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=ideall
+Comment=Local-first personal information terminal
+Exec=ideall
+Icon=com.jinziyou.ideall
+Terminal=false
+Categories=Office;Utility;
+StartupNotify=true
+StartupWMClass=ideall

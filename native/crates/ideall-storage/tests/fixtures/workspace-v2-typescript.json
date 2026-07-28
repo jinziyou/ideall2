@@ -1,0 +1,55 @@
+{
+  "kind": "ideall.workspace-archive",
+  "version": 2,
+  "exportedAt": "2026-01-01T00:00:00.000Z",
+  "core": {
+    "nodes": [
+      {
+        "id": "n1",
+        "kind": "note",
+        "title": "TS fixture",
+        "parentId": null,
+        "sortKey": "a0",
+        "tags": ["parity"],
+        "createdAt": 1,
+        "updatedAt": 2,
+        "content": [
+          {
+            "type": "p",
+            "children": [
+              {
+                "text": "中文 body"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "blobs": [
+      {
+        "key": "b1",
+        "mime": "text/plain",
+        "size": 3,
+        "dataBase64": "YWJj"
+      }
+    ],
+    "trashSnapshots": [],
+    "workspace": null
+  },
+  "plugins": {
+    "kind": "ideall.workspace-backup",
+    "version": 1,
+    "exportedAt": "2026-01-01T00:00:00.000Z",
+    "plugins": []
+  },
+  "manifest": {
+    "algorithm": "crc32",
+    "checksum": "2c8a7d50",
+    "nodeCount": 1,
+    "blobCount": 1,
+    "blobBytes": 3,
+    "trashSnapshotCount": 0,
+    "pluginCount": 0,
+    "tabCount": 0
+  }
+}

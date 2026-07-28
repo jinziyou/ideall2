@@ -1,0 +1,497 @@
+name: native-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: SemVer release version
+        required: true
+        default: 0.2.0
+        type: string
+      version_code:
+        description: Positive Android version code
+        required: true
+        default: "2"
+        type: string
+      channel:
+        description: Native update channel
+        required: true
+        default: preview
+        type: choice
+        options:
+          - preview
+          - stable
+      publish_release:
+        description: Publish/update the protected GitHub channel release after all gates pass
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: native-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  IDEALL_VERSION: ${{ inputs.version }}
+  IDEALL_VERSION_CODE: ${{ inputs.version_code }}
+  IDEALL_NATIVE_DEFAULT_UPDATE_CHANNEL: ${{ inputs.channel }}
+
+jobs:
+  gate:
+    name: Validate native release inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Require repository and release versions to match
+        run: |
+          node scripts/check-version.mjs "$IDEALL_VERSION"
+          [[ "$IDEALL_VERSION_CODE" =~ ^[1-9][0-9]*$ ]] || {
+            echo "IDEALL_VERSION_CODE must be a positive integer" >&2
+            exit 2
+          }
+
+  linux:
+    name: Linux release installers
+    runs-on: ubuntu-22.04
+    environment: native-release
+    needs: gate
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install GPUI Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libfreetype6-dev libxcb1-dev libxkbcommon-x11-dev libvulkan-dev rpm
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.96.0
+      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: ./native -> target
+      - name: Build and verify
+        run: |
+          cargo build --locked --release -p ideall-desktop
+          bash scripts/verify-linux-binary.sh target/release/ideall-desktop 2.35
+          bash scripts/package-desktop.sh
+          for artifact in target/native-packages/*.tar.gz target/native-packages/*.deb target/native-packages/*.rpm; do
+            bash scripts/verify-artifact.sh desktop "$artifact"
+          done
+          (cd target/native-packages && sha256sum -c SHA256SUMS)
+        working-directory: native
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ideall-native-linux-${{ inputs.version }}
+          path: |
+            native/target/native-packages/*.tar.gz
+            native/target/native-packages/*.deb
+            native/target/native-packages/*.rpm
+            native/target/native-packages/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+
+  macos:
+    name: Signed and notarized macOS installers
+    runs-on: macos-15
+    environment: native-release
+    needs: gate
+    timeout-minutes: 75
+    env:
+      IDEALL_MACOS_CERTIFICATE_BASE64: ${{ secrets.IDEALL_MACOS_CERTIFICATE_BASE64 }}
+      IDEALL_MACOS_CERTIFICATE_PASSWORD: ${{ secrets.IDEALL_MACOS_CERTIFICATE_PASSWORD }}
+      IDEALL_MACOS_SIGNING_IDENTITY: ${{ secrets.IDEALL_MACOS_SIGNING_IDENTITY }}
+      IDEALL_APPLE_ID: ${{ secrets.IDEALL_APPLE_ID }}
+      IDEALL_APPLE_TEAM_ID: ${{ secrets.IDEALL_APPLE_TEAM_ID }}
+      IDEALL_APPLE_APP_PASSWORD: ${{ secrets.IDEALL_APPLE_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.96.0
+      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: ./native -> target
+      - name: Import Developer ID certificate
+        run: |
+          : "${IDEALL_MACOS_CERTIFICATE_BASE64:?missing macOS certificate}"
+          : "${IDEALL_MACOS_CERTIFICATE_PASSWORD:?missing macOS certificate password}"
+          : "${IDEALL_MACOS_SIGNING_IDENTITY:?missing macOS signing identity}"
+          : "${IDEALL_APPLE_ID:?missing Apple ID}"
+          : "${IDEALL_APPLE_TEAM_ID:?missing Apple team ID}"
+          : "${IDEALL_APPLE_APP_PASSWORD:?missing Apple app password}"
+          umask 077
+          certificate="$RUNNER_TEMP/ideall-macos.p12"
+          keychain="$RUNNER_TEMP/ideall-macos.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+          printf '%s' "$IDEALL_MACOS_CERTIFICATE_BASE64" | base64 -D > "$certificate"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$IDEALL_MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+      - name: Build, sign, notarize and verify
+        run: |
+          cargo build --locked --release -p ideall-desktop
+          bash scripts/package-desktop.sh
+          for artifact in target/native-packages/*.zip target/native-packages/*.dmg; do
+            bash scripts/verify-artifact.sh desktop "$artifact"
+          done
+          codesign --verify --deep --strict target/native-packages/ideall.app
+          xcrun stapler validate target/native-packages/ideall.app
+          xcrun stapler validate target/native-packages/*.dmg
+        working-directory: native
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ideall-native-macos-${{ inputs.version }}
+          path: |
+            native/target/native-packages/*.zip
+            native/target/native-packages/*.dmg
+            native/target/native-packages/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove temporary keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/ideall-macos.keychain-db" || true
+
+  windows:
+    name: Signed Windows installers
+    runs-on: windows-latest
+    environment: native-release
+    needs: gate
+    timeout-minutes: 60
+    env:
+      IDEALL_WINDOWS_CERTIFICATE_BASE64: ${{ secrets.IDEALL_WINDOWS_CERTIFICATE_BASE64 }}
+      IDEALL_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.IDEALL_WINDOWS_CERTIFICATE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.96.0
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 8.0.x
+      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: ./native -> target
+      - name: Install Windows packaging tools
+        shell: pwsh
+        run: |
+          choco install nsis --version=3.12.0 -y --no-progress
+          dotnet tool restore
+        working-directory: native
+      - name: Decode signing certificate
+        shell: pwsh
+        run: |
+          if (-not $env:IDEALL_WINDOWS_CERTIFICATE_BASE64) { throw "missing Windows certificate" }
+          if (-not $env:IDEALL_WINDOWS_CERTIFICATE_PASSWORD) { throw "missing Windows certificate password" }
+          $certificate = Join-Path $env:RUNNER_TEMP "ideall-windows.pfx"
+          [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:IDEALL_WINDOWS_CERTIFICATE_BASE64))
+          "IDEALL_WINDOWS_CERTIFICATE=$certificate" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Build, sign and verify
+        shell: bash
+        run: |
+          cargo build --locked --release -p ideall-desktop
+          bash scripts/package-desktop.sh
+          for artifact in target/native-packages/*.zip target/native-packages/*.msi target/native-packages/*-setup.exe; do
+            bash scripts/verify-artifact.sh desktop "$artifact"
+          done
+        working-directory: native
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ideall-native-windows-${{ inputs.version }}
+          path: |
+            native/target/native-packages/*.zip
+            native/target/native-packages/*.msi
+            native/target/native-packages/*-setup.exe
+            native/target/native-packages/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+
+  android:
+    name: Signed Android App Bundle
+    runs-on: ubuntu-22.04
+    environment: native-release
+    needs: gate
+    timeout-minutes: 75
+    env:
+      ANDROID_NDK_VERSION: 26.1.10909125
+      IDEALL_ANDROID_KEYSTORE_BASE64: ${{ secrets.IDEALL_ANDROID_KEYSTORE_BASE64 }}
+      IDEALL_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.IDEALL_ANDROID_KEYSTORE_PASSWORD }}
+      IDEALL_ANDROID_KEY_ALIAS: ${{ secrets.IDEALL_ANDROID_KEY_ALIAS }}
+      IDEALL_ANDROID_KEY_PASSWORD: ${{ secrets.IDEALL_ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+      - name: Resolve Android NDK path
+        id: android-ndk
+        shell: bash
+        run: echo "path=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_OUTPUT"
+      - name: Restore Android NDK
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.android-ndk.outputs.path }}
+          key: ${{ runner.os }}-android-ndk-${{ env.ANDROID_NDK_VERSION }}
+      - name: Install Android SDK and NDK
+        env:
+          NDK_HOME: ${{ steps.android-ndk.outputs.path }}
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          if [[ ! -d "$NDK_HOME" ]]; then
+            sdkmanager "ndk;$ANDROID_NDK_VERSION"
+          fi
+      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          gradle-version: "8.9"
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.96.0
+          targets: aarch64-linux-android
+      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: ./native -> target
+      - uses: ./.github/actions/setup-cargo-ndk
+      - name: Build, sign and verify AAB
+        run: |
+          : "${IDEALL_ANDROID_KEYSTORE_BASE64:?missing Android keystore}"
+          : "${IDEALL_ANDROID_KEYSTORE_PASSWORD:?missing Android store password}"
+          : "${IDEALL_ANDROID_KEY_ALIAS:?missing Android key alias}"
+          : "${IDEALL_ANDROID_KEY_PASSWORD:?missing Android key password}"
+          umask 077
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+          export IDEALL_ANDROID_KEYSTORE="$RUNNER_TEMP/ideall-upload.jks"
+          printf '%s' "$IDEALL_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$IDEALL_ANDROID_KEYSTORE"
+          bash apps/ideall-mobile/build-mobile.sh android-bundle release
+          artifact="apps/ideall-mobile/platforms/android/app/build/outputs/bundle/release/app-release.aab"
+          bash scripts/verify-artifact.sh android-aab "$artifact"
+          jarsigner -verify -strict "$artifact"
+          mkdir -p target/native-release-mobile
+          cp "$artifact" "target/native-release-mobile/ideall-native-${IDEALL_VERSION}-android-arm64.aab"
+        working-directory: native
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ideall-native-android-${{ inputs.version }}
+          path: native/target/native-release-mobile/ideall-native-${{ inputs.version }}-android-arm64.aab
+          if-no-files-found: error
+          retention-days: 30
+
+  ios:
+    name: Signed iOS archive
+    runs-on: macos-15
+    environment: native-release
+    needs: gate
+    timeout-minutes: 90
+    env:
+      IDEALL_DEVELOPMENT_TEAM: ${{ secrets.IDEALL_IOS_DEVELOPMENT_TEAM }}
+      IDEALL_IOS_CERTIFICATE_BASE64: ${{ secrets.IDEALL_IOS_CERTIFICATE_BASE64 }}
+      IDEALL_IOS_CERTIFICATE_PASSWORD: ${{ secrets.IDEALL_IOS_CERTIFICATE_PASSWORD }}
+      IDEALL_IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IDEALL_IOS_PROVISIONING_PROFILE_BASE64 }}
+      IDEALL_IOS_CODE_SIGN_STYLE: Manual
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.96.0
+          targets: aarch64-apple-ios
+      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: ./native -> target
+      - uses: ./.github/actions/setup-xcodegen
+      - name: Import distribution identity and provisioning profile
+        run: |
+          : "${IDEALL_DEVELOPMENT_TEAM:?missing iOS development team}"
+          : "${IDEALL_IOS_CERTIFICATE_BASE64:?missing iOS certificate}"
+          : "${IDEALL_IOS_CERTIFICATE_PASSWORD:?missing iOS certificate password}"
+          : "${IDEALL_IOS_PROVISIONING_PROFILE_BASE64:?missing iOS provisioning profile}"
+          umask 077
+          certificate="$RUNNER_TEMP/ideall-ios.p12"
+          profile="$RUNNER_TEMP/ideall.mobileprovision"
+          profile_plist="$RUNNER_TEMP/ideall-profile.plist"
+          keychain="$RUNNER_TEMP/ideall-ios.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+          printf '%s' "$IDEALL_IOS_CERTIFICATE_BASE64" | base64 -D > "$certificate"
+          printf '%s' "$IDEALL_IOS_PROVISIONING_PROFILE_BASE64" | base64 -D > "$profile"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$IDEALL_IOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          security cms -D -i "$profile" > "$profile_plist"
+          profile_uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$profile_plist")"
+          profile_name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$profile_plist")"
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$profile" "$HOME/Library/MobileDevice/Provisioning Profiles/$profile_uuid.mobileprovision"
+          echo "IDEALL_IOS_PROVISIONING_PROFILE_SPECIFIER=$profile_name" >> "$GITHUB_ENV"
+      - name: Build signed archive and export IPA
+        run: |
+          bash apps/ideall-mobile/build-mobile.sh ios-ipa release
+          bash scripts/verify-artifact.sh ios-archive apps/ideall-mobile/platforms/ios/build/ideall.xcarchive
+          bash scripts/verify-artifact.sh ios-ipa "apps/ideall-mobile/platforms/ios/build/ideall-native-${IDEALL_VERSION}-ios-arm64.ipa"
+        working-directory: native
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ideall-native-ios-${{ inputs.version }}
+          path: native/apps/ideall-mobile/platforms/ios/build/ideall-native-${{ inputs.version }}-ios-arm64.ipa
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove temporary keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/ideall-ios.keychain-db" || true
+
+  service-smoke:
+    name: Staging model and synchronization smoke
+    needs: linux
+    runs-on: ubuntu-latest
+    environment: native-release
+    timeout-minutes: 20
+    env:
+      IDEALL_MODEL_BASE_URL: ${{ vars.IDEALL_MODEL_BASE_URL }}
+      IDEALL_MODEL_NAME: ${{ vars.IDEALL_MODEL_NAME }}
+      IDEALL_MODEL_API_KEY: ${{ secrets.IDEALL_MODEL_API_KEY }}
+      IDEALL_SYNC_SERVER: ${{ vars.IDEALL_SYNC_SERVER }}
+      IDEALL_SYNC_CODE: ${{ secrets.IDEALL_SYNC_CODE }}
+      IDEALL_SYNC_BEARER_TOKEN: ${{ secrets.IDEALL_SYNC_BEARER_TOKEN }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.96.0
+      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: ./native -> target
+      - name: Probe staging services without logging credentials
+        run: |
+          : "${IDEALL_MODEL_BASE_URL:?missing model base URL variable}"
+          : "${IDEALL_MODEL_NAME:?missing model name variable}"
+          : "${IDEALL_MODEL_API_KEY:?missing model API key}"
+          : "${IDEALL_SYNC_SERVER:?missing sync server variable}"
+          : "${IDEALL_SYNC_CODE:?missing sync code}"
+          : "${IDEALL_SYNC_BEARER_TOKEN:?missing sync bearer token}"
+          cargo run --locked -p ideall-cli -- model-probe \
+            --base-url "$IDEALL_MODEL_BASE_URL" \
+            --model "$IDEALL_MODEL_NAME" \
+            --prompt "Reply briefly to confirm the ideall native staging probe."
+          cargo run --locked -p ideall-cli -- sync-probe \
+            --database "$RUNNER_TEMP/ideall-service-smoke.db" \
+            --server "$IDEALL_SYNC_SERVER" \
+            --seed-title "ideall-native-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        working-directory: native
+
+  aggregate:
+    name: Verify and aggregate signed native release
+    needs: [linux, macos, windows, android, ios, service-smoke]
+    runs-on: ubuntu-latest
+    environment: native-release
+    timeout-minutes: 45
+    env:
+      IDEALL_UPDATE_PRIVATE_KEY: ${{ secrets.IDEALL_UPDATE_PRIVATE_KEY }}
+      IDEALL_UPDATE_PRIVATE_KEY_PASSWORD: ${{ secrets.IDEALL_UPDATE_PRIVATE_KEY_PASSWORD }}
+      RELEASE_CHANNEL: ${{ inputs.channel }}
+      RELEASE_TAG: native-${{ inputs.channel }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_INPUT_DIR: native-release-input
+      RELEASE_OUTPUT_DIR: native-release-ready
+      RELEASE_NOTES: Native ${{ inputs.channel }} ${{ inputs.version }} · ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.96.0
+      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: ./native -> target
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: ideall-native-*-${{ inputs.version }}
+          path: native-release-input
+      - name: Prepare deterministic update manifest
+        run: node scripts/native-release-artifacts.mjs prepare
+      - name: Sign and cryptographically verify update manifest
+        run: |
+          : "${IDEALL_UPDATE_PRIVATE_KEY:?missing updater signing key}"
+          : "${IDEALL_UPDATE_PRIVATE_KEY_PASSWORD:?missing updater signing key password}"
+          manifest="native-release-ready/native-${RELEASE_CHANNEL}.json"
+          cargo run --locked --manifest-path native/Cargo.toml -p ideall-cli -- update-sign \
+            --manifest "$manifest" \
+            --signature "$manifest.sig"
+          cargo run --locked --manifest-path native/Cargo.toml -p ideall-cli -- update-verify \
+            --manifest "$manifest" \
+            --signature "$manifest.sig" \
+            --channel "$RELEASE_CHANNEL"
+      - name: Finalize checksums and release inventory
+        run: node scripts/native-release-artifacts.mjs finalize
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ideall-native-release-${{ inputs.channel }}-${{ inputs.version }}
+          path: native-release-ready
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  publish:
+    name: Publish protected native channel
+    needs: aggregate
+    if: inputs.publish_release
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.channel == 'stable' && 'native-stable' || 'native-release' }}
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_CHANNEL: ${{ inputs.channel }}
+      RELEASE_TAG: native-${{ inputs.channel }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ideall-native-release-${{ inputs.channel }}-${{ inputs.version }}
+          path: native-release-ready
+      - name: Create or safely advance the fixed channel release
+        run: |
+          update_manifest="native-release-ready/native-${RELEASE_CHANNEL}.json"
+          update_signature="${update_manifest}.sig"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            payloads=()
+            for file in native-release-ready/*; do
+              [[ "$file" == "$update_manifest" || "$file" == "$update_signature" ]] || payloads+=("$file")
+            done
+            gh release upload "$RELEASE_TAG" "${payloads[@]}" --clobber
+            gh release upload "$RELEASE_TAG" "$update_signature" --clobber
+            gh release upload "$RELEASE_TAG" "$update_manifest" --clobber
+            gh release edit "$RELEASE_TAG" \
+              --title "ideall native ${RELEASE_CHANNEL} $IDEALL_VERSION" \
+              --notes "Native ${RELEASE_CHANNEL} $IDEALL_VERSION · $GITHUB_SHA"
+          else
+            prerelease=()
+            [[ "$RELEASE_CHANNEL" == "preview" ]] && prerelease=(--prerelease)
+            gh release create "$RELEASE_TAG" native-release-ready/* \
+              --target "$GITHUB_SHA" \
+              --title "ideall native ${RELEASE_CHANNEL} $IDEALL_VERSION" \
+              --notes "Native ${RELEASE_CHANNEL} $IDEALL_VERSION · $GITHUB_SHA" \
+              --latest=false \
+              "${prerelease[@]}"
+          fi

@@ -1,0 +1,17 @@
+[package]
+name = "ideall-domain"
+description = "Pure domain logic for ideall engines and workspaces"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+ideall-protocol = { path = "../ideall-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -65,7 +65,7 @@ impl Default for ExplorerLayoutState {
 }
 
 const fn default_explorer_width() -> u16 {
-    286
+    272
 }
 
 const fn default_true() -> bool {
@@ -209,7 +209,7 @@ mod tests {
             serde_json::from_str(r#"{"kind":"files","tabs":[],"activeId":null}"#).unwrap();
 
         assert_eq!(state.explorer, ExplorerLayoutState::default());
-        assert_eq!(state.explorer.width, 286);
+        assert_eq!(state.explorer.width, 272);
         assert!(state.explorer.visible);
     }
 }

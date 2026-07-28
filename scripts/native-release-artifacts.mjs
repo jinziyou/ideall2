@@ -11,7 +11,7 @@ import {
 } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { assertSignatureMatchesPublicKey } from "./release-preflight.mjs"
+import { assertSignatureMatchesPublicKey } from "./lib/minisign.mjs"
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..")
 

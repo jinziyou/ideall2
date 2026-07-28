@@ -61,7 +61,7 @@ if (fixtureMode) {
   await runFixture(fixtureMode)
 } else {
   const { afterEach, test } = await import("node:test")
-  const { parseRunnerArgs, runTestFile } = await import("./run-tests.mjs")
+  const { parseRunnerArgs, runTestFile } = await import("./lib/test-runner.mjs")
   const { isPortAvailable, sleep } = await import("./lib/process.mjs")
   const tempRoots = []
 

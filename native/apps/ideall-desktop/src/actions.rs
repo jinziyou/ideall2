@@ -11,7 +11,13 @@ actions!(
         NextTab,
         PreviousTab,
         ToggleProjectPanel,
+        SelectRecentSection,
+        SelectBrowserSection,
+        SelectAppsSection,
+        SelectSettingsSection,
         NewTextFile,
+        NewFolder,
+        ImportFiles,
         FindInEditor,
         ReplaceInEditor,
         OpenSelectedNode,
@@ -46,6 +52,10 @@ pub(super) fn init(cx: &mut App) {
         KeyBinding::new("ctrl-tab", NextTab, Some(CONTEXT)),
         KeyBinding::new("ctrl-shift-tab", PreviousTab, Some(CONTEXT)),
         KeyBinding::new("alt-1", ToggleProjectPanel, Some(CONTEXT)),
+        KeyBinding::new("alt-2", SelectRecentSection, Some(CONTEXT)),
+        KeyBinding::new("alt-3", SelectBrowserSection, Some(CONTEXT)),
+        KeyBinding::new("alt-4", SelectAppsSection, Some(CONTEXT)),
+        KeyBinding::new("alt-5", SelectSettingsSection, Some(CONTEXT)),
         KeyBinding::new("cmd-shift-n", NewTextFile, Some(CONTEXT)),
         KeyBinding::new("ctrl-shift-n", NewTextFile, Some(CONTEXT)),
         KeyBinding::new("cmd-f", FindInEditor, Some(CONTEXT)),
@@ -91,7 +101,9 @@ impl IdeallDesktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.show_files(window, cx);
+        if self.active_section.as_ref() != "我的" {
+            self.show_files(window, cx);
+        }
         self.create_note(window, cx);
     }
 
@@ -150,14 +162,76 @@ impl IdeallDesktop {
         self.toggle_project_panel(cx);
     }
 
+    pub(super) fn select_recent_section_from_shortcut(
+        &mut self,
+        _: &SelectRecentSection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_section("活动", window, cx);
+    }
+
+    pub(super) fn select_browser_section_from_shortcut(
+        &mut self,
+        _: &SelectBrowserSection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_section("浏览", window, cx);
+    }
+
+    pub(super) fn select_apps_section_from_shortcut(
+        &mut self,
+        _: &SelectAppsSection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_section("应用", window, cx);
+    }
+
+    pub(super) fn select_settings_section_from_shortcut(
+        &mut self,
+        _: &SelectSettingsSection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_section("设置", window, cx);
+    }
+
     pub(super) fn create_text_file_from_shortcut(
         &mut self,
         _: &NewTextFile,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.show_files(window, cx);
+        if self.active_section.as_ref() != "我的" {
+            self.show_files(window, cx);
+        }
         self.create_text_file(window, cx);
+    }
+
+    pub(super) fn create_folder_from_tree(
+        &mut self,
+        _: &NewFolder,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_section.as_ref() != "我的" {
+            self.show_files(window, cx);
+        }
+        self.create_folder(window, cx);
+    }
+
+    pub(super) fn import_files_from_tree(
+        &mut self,
+        _: &ImportFiles,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_section.as_ref() != "我的" {
+            self.show_files(window, cx);
+        }
+        self.import_files(cx);
     }
 
     pub(super) fn find_in_editor(

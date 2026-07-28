@@ -1,146 +1,42 @@
-# 脚本与维护入口
+# 脚本与验证入口
 
-本文集中说明 `package.json` 暴露的维护命令，以及 `native/scripts/`、`scripts/` 下的脚本。
-产品架构见 [architecture.md](architecture.md)，生产打包与发布见
-[`native/README.md`](../native/README.md) 和 [`native/RELEASE.md`](../native/RELEASE.md)。
+根目录 pnpm 只统一调用 Rust 工具链和少量 Node 维护脚本；产品运行时不依赖 Node。
 
-## 入口分层
+## 原生应用
 
-| 类型 | 入口 | 用途 |
-| --- | --- | --- |
-| 日常开发 | `pnpm dev` / `pnpm app:dev` | 启动 GPUI 桌面 App |
-| 原生检查 | `pnpm native:check` / `native:test` / `native:lint` | Cargo workspace 检查、测试、rustfmt 与 Clippy |
-| 质量门禁 | `pnpm verify:checks` | format、代码/工作流/依赖/孤立文件/文档 lint、版本一致性、typecheck、test、API drift |
-| 完整门禁 | `pnpm verify` / `pnpm verify:base` | `verify:checks` + 原生 lint/test，不执行生产打包 |
-| 覆盖率门禁 | `pnpm test:coverage` | 为选定核心源码生成 c8 text/lcov 报告，并检查覆盖率基线 |
-| 旧兼容冒烟 | `pnpm verify:smoke:static` / `verify:full` | 验证旧 Next.js V2 导出兼容层 |
-| API 契约 | `pnpm gen:api` / `pnpm gen:api:check` / `pnpm sync:api` | OpenAPI schema 与生成类型维护 |
-| App 发布 | `pnpm app:build` / `pnpm bump` | 构建当前宿主 GPUI 桌面包并同步版本；跨平台矩阵由 CI 执行 |
-| Git 维护 | `pnpm git:setup` / `pnpm git:pull` | 配置移动发布标签 refspec；执行仅快进的安全 pull |
-| 旧静态预览 | `pnpm verify:static-export` / `pnpm serve:out` | 检查或预览已有 `out/` 兼容产物 |
-
-常用维护脚本支持 `--help`，例如：
-
-```bash
-node scripts/verify-static-smoke.mjs --help
-node scripts/verify-full.mjs --help
-node scripts/run-tests.mjs --help
-node scripts/run-script-tests.mjs --help
-node scripts/check-docs.mjs --help
-node scripts/git-setup.mjs --help
-node scripts/git-pull.mjs --help
-node scripts/check-version.mjs --help
-node scripts/bump-version.mjs --help
-node scripts/release-preflight.mjs --help
-node scripts/release-artifacts.mjs --help
-node scripts/release-publish.mjs --help
-```
-
-## 验证命令
-
-```bash
-pnpm native:check
-pnpm native:test
-pnpm native:lint
-pnpm verify:base
-```
-
-原生改动优先运行前三项。`verify:base` 等同于 `verify`，执行：
-
-1. `pnpm verify:checks`
-2. `pnpm native:lint`
-3. `pnpm native:test`
-
-`verify:checks` 负责格式、TypeScript 兼容层、依赖/孤立文件、文档、版本、覆盖率、脚本测试
-与 API 漂移。它不构建 GPUI release，也不生成 `out/`。
-
-`verify:bundle`、`verify:static-export`、`verify:smoke:static` 和 `verify:full` 都只服务旧
-Next.js 导出兼容层。已有兼容构建时可单独运行：
-
-```bash
-pnpm verify:bundle
-```
-
-该命令依赖已有 `out/`，不负责触发构建，也不是 GPUI 包预算。
-
-```bash
-pnpm verify:smoke:static
-node scripts/verify-static-smoke.mjs --no-build smoke:notes
-```
-
-旧兼容层静态冒烟。默认先运行 `pnpm legacy:web:export`，随后启动
-`scripts/serve-out.mjs` 并运行 notes/files/plugins/trash 冒烟。
-
-```bash
-pnpm verify:full
-pnpm verify:smoke
-```
-
-旧兼容层开发服冒烟。它们不启动或验证 GPUI 桌面窗口。
-
-## 测试与冒烟
-
-```bash
-pnpm test
-pnpm test sort-key
-pnpm test:coverage
-```
-
-`scripts/run-tests.mjs` 运行 `src/**/*.test.ts`。传入子串时只运行路径包含该子串的测试；少数会启动真实 SDK server 或子进程的 MCP 测试会在并发批次后串行运行。
-
-`pnpm test:coverage` 运行同一组业务测试，并为 protocol、filesystem、engines、shell 启动/运行时扩展、workspace store 和 plugins/shared 等选定核心路径中的可执行代码生成 c8 text/lcov 报告；纯类型契约不参与分母。门禁要求 statements/lines ≥ 80%、branches ≥ 75%、functions ≥ 78%，并作为 `verify:checks` 的业务测试步骤；普通开发仍可用 `pnpm test [过滤串]` 快速运行聚焦测试。
-
-`pnpm test:scripts` 自动发现 `scripts/*.test.mjs`，并使用隔离子进程运行原生 `node:test` 维护脚本测试；可像 `pnpm test:scripts -- release-artifacts` 一样用路径子串聚焦。它与业务测试分开，便于脚本保持纯 Node、跨平台且不依赖应用别名。runner 复用业务测试的超时、进程树回收和有限日志能力，并避免依赖 `node --test` CLI 的 glob 实现。
-
-浏览器冒烟脚本：
-
-| 脚本 | 覆盖 |
+| 命令 | 用途 |
 | --- | --- |
-| `pnpm smoke:notes` | 笔记主链路 |
-| `pnpm smoke:files` | 资源管理与文件 IDE 链路 |
-| `pnpm smoke:files:preview` | 资源预览类型扩展覆盖 |
-| `pnpm smoke:plugins` | 内置插件入口 |
-| `pnpm smoke:trash` | 回收站链路 |
+| `pnpm app:dev` / `pnpm dev` | 启动 GPUI 桌面 App |
+| `pnpm app:build` / `pnpm build` | Release 构建并打包桌面 App |
+| `pnpm native:check` | 检查 workspace 全 targets 与移动 host-check |
+| `pnpm native:test` | 运行全部 Rust 测试 |
+| `pnpm native:lint` | rustfmt 与 clippy `-D warnings` |
+| `pnpm native:android*` | Android APK/AAB 入口 |
+| `pnpm native:ios:*` | iOS simulator/device/archive/IPA 入口 |
 
-冒烟实现集中在 `scripts/smoke/`，插件子场景在 `scripts/smoke/plugins/`。冒烟脚本默认读取 `BASE` 环境变量；未设置时脚本内部会使用各自默认地址。CI 的生产冒烟通过 `verify-static-smoke.mjs` 注入 `BASE`。
+## 仓库门禁
 
-## API 与发布
+| 命令 | 用途 |
+| --- | --- |
+| `pnpm lint:actions` | 校验 GitHub Actions |
+| `pnpm lint:docs` | 校验 Markdown 相对链接 |
+| `pnpm version:check` | 校验 Cargo 与平台包版本 |
+| `pnpm test:scripts` | 隔离运行 `scripts/*.test.mjs` |
+| `pnpm verify:checks` | 运行格式、文档、Actions、版本与脚本门禁 |
+| `pnpm verify` | 在轻量门禁后运行完整原生 check/lint/test |
 
-```bash
-pnpm gen:api
-pnpm gen:api:check
-SERVER_LOCAL=/abs/path/to/wonita/apps/apiserver/openapi.json \
-SERVER_SOURCE_PATH=apps/apiserver/openapi.json \
-SERVER_SOURCE_COMMIT=<wonita-commit> pnpm sync:api
-```
-
-`openapi/server.json` 是提交到仓库的契约快照；`openapi/server.provenance.json` 同时记录 wonita
-仓库、不可变 commit、源路径和快照 SHA-256；`src/lib/api/server.d.ts` 是生成物，只允许 HTTP
-适配器消费。`pnpm gen:api:check` 会先验证 provenance 与快照哈希，再检查生成类型，因此单独替换
-快照以及缺失或格式错误的 commit 都会使 CI 失败。普通开发通常只需要 `pnpm gen:api`，维护者拿到后端新
-schema 时才运行 `sync:api`；同步必须提供 `SERVER_SOURCE_COMMIT`。非默认 fork 或源路径可另设
-`SERVER_SOURCE_REPOSITORY=owner/repo`、`SERVER_SOURCE_PATH=path/to/openapi.json`。
-
-跨仓自动同步由中立的 `jinziyou` 编排仓负责：wonita `dev` 的 OpenAPI 更新会触发一个 ideall PR，
-PR 同时更新快照、provenance 与生成类型。手工同步主要用于本地预检和自动化故障恢复。
+`test:scripts` 支持用文件名子串过滤：
 
 ```bash
-pnpm bump <x.y.z>
-pnpm version:check
-pnpm app:build
+pnpm test:scripts -- native-release
+pnpm test:scripts -- native-mobile
 ```
 
-`pnpm bump` 会先完整校验版本文件和替换计划，再同步 `package.json`、`native/Cargo.toml`、`native/Cargo.lock`、桌面打包脚本与移动宿主版本；结构漂移或当前版本不一致时不会开始写入。`pnpm version:check` 是对应的只读门禁。`pnpm app:build` 构建当前宿主平台的 GPUI 桌面应用；签名、自动更新和跨平台 CI 矩阵见 [native/RELEASE.md](../native/RELEASE.md)。
+## 发布与目录
 
-当前生产发布链位于 `.github/workflows/native-release.yml`、`native/scripts/` 和 `scripts/native-release-artifacts.mjs`。`release-preflight.mjs`、`release-artifacts.mjs` 与 `release-publish.mjs` 只服务于已冻结的 Tauri 兼容发布夹具，不再是生产入口；其纯函数仍由 `pnpm test:scripts` 覆盖，便于迁移期间验证旧产物。
+- `scripts/native-release-artifacts.mjs`：整理、校验和签名 GPUI 五平台产物。
+- `scripts/lib/minisign.mjs`：原生更新产物使用的 Minisign key-id 校验。
+- `scripts/bump-version.mjs` / `check-version.mjs`：维护多平台版本一致性。
 
-## 新增脚本约定
-
-- 新增对外命令时先在 `package.json` 暴露清晰名称，再把实现放到 `scripts/`。
-- 需要启动子进程、探测端口、等待 HTTP 就绪或清理进程时，优先复用
-  `scripts/lib/process.mjs`。
-- `scripts/` 根目录只放可执行入口及其 `*.test.mjs`；无独立命令行入口的共享模块统一放在
-  `scripts/lib/`，避免维护入口与实现细节混排。
-- 长流程脚本应支持 `--help`，并在失败时输出可定位的脚本名前缀。
-- 冒烟脚本应支持 `BASE`，避免把端口写死在脚本内部。
-- 不要在 npm script 中使用平台专属 shell 命令；需要文件清理或路径处理时用 Node 脚本。
+生产发布流程见 [native/RELEASE.md](../native/RELEASE.md)。旧 Web/Tauri 的构建、静态导出、
+Playwright 冒烟和 OpenAPI TypeScript codegen 只保留在 `legacy/tauri-v2` 分支。

@@ -7,20 +7,14 @@ pub(crate) enum EditorMode {
     Plain,
     Code,
     Preview,
-    Browser,
 }
 
 impl EditorWorkspace {
-    pub(crate) fn mode(&self, browser_available: bool) -> EditorMode {
+    pub(crate) fn mode(&self) -> EditorMode {
         match self.active_engine_id.as_deref() {
             Some("ideall.code") if self.selected_kind == Some(NodeKind::File) => EditorMode::Code,
             Some("ideall.preview") if self.selected_kind == Some(NodeKind::File) => {
                 EditorMode::Preview
-            }
-            Some("ideall.browser")
-                if browser_available && self.selected_kind == Some(NodeKind::Bookmark) =>
-            {
-                EditorMode::Browser
             }
             _ => EditorMode::Plain,
         }
@@ -46,7 +40,6 @@ impl IdeallDesktop {
                     ),
                     ("note-block-h1", "H1", "一级标题", NoteBlockStyle::Heading1),
                     ("note-block-h2", "H2", "二级标题", NoteBlockStyle::Heading2),
-                    ("note-block-h3", "H3", "三级标题", NoteBlockStyle::Heading3),
                     ("note-block-bullet", "•", "项目列表", NoteBlockStyle::Bullet),
                     (
                         "note-block-ordered",
@@ -57,7 +50,6 @@ impl IdeallDesktop {
                     ("note-block-todo", "☐", "待办", NoteBlockStyle::Todo),
                     ("note-block-quote", "❝", "引用", NoteBlockStyle::Quote),
                     ("note-block-code", "</>", "代码块", NoteBlockStyle::Code),
-                    ("note-block-rule", "—", "分隔线", NoteBlockStyle::Rule),
                 ]
                 .into_iter()
                 .map(|(id, label, tooltip, style)| {
@@ -144,59 +136,19 @@ impl IdeallDesktop {
                     })),
             )
             .child(
-                Button::new("note-block-up")
-                    .label("↑")
-                    .tooltip("上移当前块")
-                    .small()
-                    .ghost()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.move_current_note_block(NoteBlockMove::Up, window, cx);
-                    })),
-            )
-            .child(
-                Button::new("note-block-down")
-                    .label("↓")
-                    .tooltip("下移当前块")
-                    .small()
-                    .ghost()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.move_current_note_block(NoteBlockMove::Down, window, cx);
-                    })),
-            )
-            .child(
-                Button::new("note-block-duplicate")
-                    .label("⧉")
-                    .tooltip("复制当前块")
-                    .small()
-                    .ghost()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.duplicate_current_note_block(window, cx);
-                    })),
-            )
-            .child(
-                Button::new("note-block-delete")
-                    .label("⌫")
-                    .tooltip("删除当前块")
-                    .small()
-                    .ghost()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.delete_current_note_block(window, cx);
-                    })),
-            )
-            .child(
                 div()
                     .whitespace_nowrap()
                     .text_xs()
                     .text_color(rgb(INK_FAINT))
-                    .child("输入 / 插入块"),
+                    .child("/ 更多"),
             );
 
         // ScrollableElement moves the wrapped element's own style to an outer
         // viewport. Keep flex-row on a child so scrolling cannot reset it.
         let viewport = div()
             .w_full()
-            .h(px(40.0))
-            .rounded_lg()
+            .h(px(36.0))
+            .rounded_md()
             .border_1()
             .border_color(rgb(BORDER))
             .bg(rgb(SURFACE_MUTED))
@@ -204,14 +156,14 @@ impl IdeallDesktop {
             .overflow_x_scrollbar();
 
         div()
-            .h(px(56.0))
+            .h(px(48.0))
             .flex()
             .items_center()
-            .px_5()
+            .px_4()
             .border_b_1()
             .border_color(rgb(BORDER))
             .bg(rgb(EDITOR))
-            .child(div().w_full().max_w(px(920.0)).mx_auto().child(viewport))
+            .child(div().w_full().max_w(px(760.0)).mx_auto().child(viewport))
             .into_any_element()
     }
 

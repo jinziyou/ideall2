@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   quality:
-    name: TypeScript migration compatibility
+    name: Repository metadata and scripts
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -25,14 +25,5 @@ jobs:
       - uses: ./.github/actions/setup-js
       - name: Run quality checks
         run: pnpm verify:checks
-      - name: Upload core coverage
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: core-coverage
-          path: node_modules/.cache/ideall/coverage
-          if-no-files-found: ignore
-          retention-days: 7
 
-# 生产 App 的编译、打包和五平台冒烟统一由 rust.yml / native-release.yml 承担。
-# smoke.yml 只验证迁移期 Web 数据导出与 wire 兼容，不产生发布产物。
+# GPUI App 的编译、测试、打包和五平台门禁统一由 rust.yml / native-release.yml 承担。

@@ -212,10 +212,6 @@ impl EditorWorkspace {
         self.active_input().read(cx).value().to_string()
     }
 
-    pub(super) fn cursor_position(&self, cx: &Context<IdeallDesktop>) -> Position {
-        self.active_input().read(cx).cursor_position()
-    }
-
     pub(super) fn find_match_count(&self, cx: &Context<IdeallDesktop>) -> usize {
         let query = self.find_input.read(cx).value().to_string();
         if query.is_empty() {

@@ -33,33 +33,36 @@ pub mod color {
     pub const DISABLED: u32 = 0xaab4c2;
     pub const MESSAGE_TOOL: u32 = 0xf0f2ef;
 
-    /// Desktop-only light palette for the compact JetBrains-inspired workbench.
+    /// Desktop-only light palette for the compact, AI-native workbench.
     pub mod desktop {
-        pub const CANVAS: u32 = 0xf7f8fa;
+        pub const CANVAS: u32 = 0xf2f4f2;
         pub const SURFACE: u32 = 0xffffff;
-        pub const SURFACE_MUTED: u32 = 0xf2f3f5;
+        pub const SURFACE_MUTED: u32 = 0xf6f7f5;
         pub const SURFACE_RAISED: u32 = 0xffffff;
-        pub const INK: u32 = 0x1f2329;
-        pub const INK_MUTED: u32 = 0x5e636d;
-        pub const INK_FAINT: u32 = 0x8a8f98;
-        pub const BORDER: u32 = 0xdfe1e5;
-        pub const BORDER_STRONG: u32 = 0xc9ccd2;
-        pub const ACCENT: u32 = 0x3574f0;
-        pub const ACCENT_SOFT: u32 = 0xe7efff;
-        pub const RAIL: u32 = 0xf2f3f5;
-        pub const RAIL_MUTED: u32 = 0x6c7078;
-        pub const RAIL_ACTIVE: u32 = 0xdde7f8;
-        pub const RAIL_INK: u32 = 0x1f2329;
-        pub const DANGER: u32 = 0xc75450;
-        pub const DANGER_BORDER: u32 = 0xe2b7b5;
+        pub const INK: u32 = 0x1c211e;
+        pub const INK_MUTED: u32 = 0x626a65;
+        pub const INK_FAINT: u32 = 0x929a95;
+        pub const BORDER: u32 = 0xe1e5e2;
+        pub const BORDER_STRONG: u32 = 0xcbd1cd;
+        pub const ACCENT: u32 = 0x16825d;
+        pub const ACCENT_HOVER: u32 = 0x126f50;
+        pub const ACCENT_ACTIVE: u32 = 0x0e5d43;
+        pub const ACCENT_SOFT: u32 = 0xe4f3eb;
+        pub const ACCENT_ON_RAIL: u32 = 0x72e3aa;
+        pub const RAIL: u32 = 0x181b19;
+        pub const RAIL_MUTED: u32 = 0x939c96;
+        pub const RAIL_ACTIVE: u32 = 0x2b302d;
+        pub const RAIL_INK: u32 = 0xf5f8f6;
+        pub const DANGER: u32 = 0xb84943;
+        pub const DANGER_BORDER: u32 = 0xddb7b3;
         pub const WARNING_SOFT: u32 = 0xfff3d6;
-        pub const MESSAGE_TOOL: u32 = 0xf0f1f3;
-        pub const TOOLBAR: u32 = 0xf2f3f5;
+        pub const MESSAGE_TOOL: u32 = 0xf0f3f1;
+        pub const TOOLBAR: u32 = SURFACE_MUTED;
         pub const EDITOR: u32 = 0xffffff;
-        pub const EDITOR_GUTTER: u32 = 0xf7f8fa;
-        pub const HOVER: u32 = 0xe9eaed;
-        pub const SELECTION: u32 = 0xdce7f8;
-        pub const STATUS_BAR: u32 = 0xf2f3f5;
+        pub const EDITOR_GUTTER: u32 = 0xf7f8f6;
+        pub const HOVER: u32 = 0xeff2f0;
+        pub const SELECTION: u32 = 0xdaf0e4;
+        pub const STATUS_BAR: u32 = CANVAS;
     }
 }
 
@@ -82,25 +85,25 @@ pub const NAVIGATION: [NavigationItem; 5] = [
         section: "活动",
         label: "最近",
         icon: "◷",
-        shortcut: "",
+        shortcut: "Alt 2",
     },
     NavigationItem {
         section: "浏览",
         label: "浏览",
         icon: "◈",
-        shortcut: "",
+        shortcut: "Alt 3",
     },
     NavigationItem {
         section: "应用",
-        label: "Agent",
+        label: "应用",
         icon: "✦",
-        shortcut: "",
+        shortcut: "Alt 4",
     },
     NavigationItem {
         section: "设置",
         label: "设置",
         icon: "⚙",
-        shortcut: "",
+        shortcut: "Alt 5",
     },
 ];
 
@@ -180,6 +183,7 @@ mod tests {
         for item in NAVIGATION {
             assert!(!item.icon.is_empty());
             assert!(!item.label.is_empty());
+            assert!(!item.shortcut.is_empty());
             assert_ne!(section_eyebrow(item.section), "IDEALL");
             assert_ne!(section_description(item.section), "本地优先个人信息终端");
         }

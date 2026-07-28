@@ -99,6 +99,7 @@ impl ExplorerState {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn expand_all(&mut self) {
         self.expanded_folders.extend(
             self.items
@@ -108,6 +109,7 @@ impl ExplorerState {
         );
     }
 
+    #[cfg(test)]
     pub(super) fn collapse_all(&mut self) {
         self.expanded_folders.clear();
     }
@@ -183,7 +185,7 @@ mod tests {
             selection_id: None,
             expanded_folders: HashSet::new(),
             panel_visible: true,
-            panel_width: 286,
+            panel_width: 272,
             rename_input: None,
             renaming_id: None,
             resize_state: None,

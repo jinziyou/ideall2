@@ -2,18 +2,24 @@ use super::*;
 use url::Url;
 
 mod actions;
+mod view;
+
+pub(crate) use view::browser_surface;
 
 const MAX_BROWSER_HISTORY: usize = 100;
 const MAX_URL_CHARS: usize = 8 * 1024;
 
-/// Owns browser navigation state without adding a standalone workbench page.
+/// Owns browser navigation and independent surface state without adding a
+/// top-level workbench destination.
 ///
-/// Bookmark and portal flows borrow this component's WebView. Navigation,
-/// history and URL validation therefore remain independent from editor state.
+/// Bookmark and portal flows render through `BrowserSurface`. Navigation,
+/// history, address input and WebView lifetime remain independent from editor
+/// state even though browser tabs keep the shared `FileRef + Engine` identity.
 pub(super) struct BrowserWorkspace {
     current_url: Option<String>,
     webview: Option<Entity<WebView>>,
     history: BrowserHistory,
+    address_input: Entity<InputState>,
 }
 
 #[derive(Default)]
@@ -23,11 +29,12 @@ struct BrowserHistory {
 }
 
 impl BrowserWorkspace {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(address_input: Entity<InputState>) -> Self {
         Self {
             current_url: None,
             webview: None,
             history: BrowserHistory::default(),
+            address_input,
         }
     }
 
@@ -39,13 +46,43 @@ impl BrowserWorkspace {
         self.current_url = Some(url);
     }
 
-    pub(super) fn clear(&mut self) {
+    pub(super) fn clear(&mut self, window: &mut Window, cx: &mut Context<IdeallDesktop>) {
         self.current_url = None;
         self.webview = None;
+        self.address_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
     }
 
     pub(super) fn webview(&self) -> Option<Entity<WebView>> {
         self.webview.clone()
+    }
+
+    pub(super) fn current_url(&self) -> Option<&str> {
+        self.current_url.as_deref()
+    }
+
+    pub(super) fn address_input(&self) -> &Entity<InputState> {
+        &self.address_input
+    }
+
+    pub(super) fn can_go_back(&self) -> bool {
+        self.history.can_go_back()
+    }
+
+    pub(super) fn can_go_forward(&self) -> bool {
+        self.history.can_go_forward()
+    }
+
+    fn go_back(&mut self) -> Option<String> {
+        let url = self.history.go_back()?.to_owned();
+        self.current_url = Some(url.clone());
+        Some(url)
+    }
+
+    fn go_forward(&mut self) -> Option<String> {
+        let url = self.history.go_forward()?.to_owned();
+        self.current_url = Some(url.clone());
+        Some(url)
     }
 }
 
@@ -59,6 +96,29 @@ impl BrowserHistory {
             self.entries.remove(0);
         }
         self.index = Some(self.entries.len() - 1);
+    }
+
+    fn can_go_back(&self) -> bool {
+        self.index.is_some_and(|index| index > 0)
+    }
+
+    fn can_go_forward(&self) -> bool {
+        self.index
+            .is_some_and(|index| index + 1 < self.entries.len())
+    }
+
+    fn go_back(&mut self) -> Option<&str> {
+        let index = self.index?;
+        let previous = index.checked_sub(1)?;
+        self.index = Some(previous);
+        self.entries.get(previous).map(String::as_str)
+    }
+
+    fn go_forward(&mut self) -> Option<&str> {
+        let next = self.index?.checked_add(1)?;
+        let entry = self.entries.get(next)?;
+        self.index = Some(next);
+        Some(entry.as_str())
     }
 }
 
@@ -134,5 +194,25 @@ mod tests {
             vec!["https://a.example/", "https://c.example/"]
         );
         assert_eq!(history.index, Some(1));
+    }
+
+    #[test]
+    fn browser_history_moves_back_and_forward_without_recording_duplicates() {
+        let mut history = BrowserHistory::default();
+        history.record("https://a.example/".into());
+        history.record("https://b.example/".into());
+        history.record("https://c.example/".into());
+
+        assert!(history.can_go_back());
+        assert!(!history.can_go_forward());
+        assert_eq!(history.go_back(), Some("https://b.example/"));
+        assert_eq!(history.go_back(), Some("https://a.example/"));
+        assert_eq!(history.go_back(), None);
+        assert!(!history.can_go_back());
+        assert!(history.can_go_forward());
+        assert_eq!(history.go_forward(), Some("https://b.example/"));
+        assert_eq!(history.go_forward(), Some("https://c.example/"));
+        assert_eq!(history.go_forward(), None);
+        assert!(!history.can_go_forward());
     }
 }

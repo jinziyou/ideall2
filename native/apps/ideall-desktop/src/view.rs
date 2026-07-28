@@ -1,160 +1,238 @@
 use super::*;
-use crate::actions::{OpenSelectedNode, RenameSelectedNode, TrashSelectedNode};
+use crate::actions::{
+    ImportFiles, NewFolder, NewNote, NewTextFile, OpenSelectedNode, RenameSelectedNode,
+    TrashSelectedNode,
+};
 
 impl IdeallDesktop {
     fn render_top_bar(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
-        let selected_title = self
-            .editor
-            .selected_id
-            .as_deref()
-            .and_then(|selected_id| {
-                self.explorer
-                    .items
-                    .iter()
-                    .find(|item| item.id == selected_id)
-                    .map(|item| item.title.clone())
-            })
-            .unwrap_or_else(|| "工作台".into());
-
         div()
-            .h(px(52.0))
-            .flex()
-            .items_center()
-            .gap_3()
-            .px_3()
-            .border_b_1()
-            .border_color(rgb(BORDER))
-            .bg(rgb(SURFACE))
+            .h(px(54.0))
+            .px(px(8.0))
+            .pt(px(8.0))
+            .bg(rgb(CANVAS))
             .child(
                 div()
-                    .w(px(32.0))
-                    .h(px(32.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded_lg()
-                    .bg(rgb(ACCENT))
-                    .text_sm()
-                    .text_color(rgb(0xffffff))
-                    .child("i"),
-            )
-            .child(
-                Button::new("toggle-project-panel")
-                    .label("☰")
-                    .small()
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.toggle_project_panel(cx);
-                    })),
-            )
-            .child(
-                div()
-                    .min_w(px(210.0))
+                    .size_full()
                     .flex()
                     .items_center()
                     .gap_2()
-                    .text_sm()
-                    .child(div().text_color(rgb(INK)).child("ideall"))
-                    .child(div().text_color(rgb(INK_FAINT)).child("›"))
-                    .child(
-                        div()
-                            .max_w(px(220.0))
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .whitespace_nowrap()
-                            .text_color(rgb(INK_MUTED))
-                            .child(selected_title),
-                    ),
-            )
-            .child(
-                div().flex_1().flex().justify_center().child(
-                    Input::new(&self.search_input)
-                        .w(px(420.0))
-                        .small()
-                        .prefix(div().pl_1().text_color(rgb(INK_FAINT)).child("⌕"))
-                        .suffix(
-                            div()
-                                .pr_1()
-                                .text_xs()
-                                .text_color(rgb(INK_FAINT))
-                                .child("Ctrl K"),
-                        )
-                        .cleanable(true),
-                ),
-            )
-            .child(
-                Button::new("top-new-file")
-                    .label("+ 文件")
-                    .small()
-                    .primary()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.show_files(window, cx);
-                        this.create_text_file(window, cx);
-                    })),
-            )
-            .child(
-                div()
                     .px_3()
-                    .py(px(6.0))
                     .rounded_lg()
                     .border_1()
                     .border_color(rgb(BORDER))
-                    .bg(rgb(SURFACE_MUTED))
-                    .text_xs()
-                    .text_color(rgb(INK_MUTED))
-                    .child("LOCAL"),
+                    .bg(rgb(SURFACE))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                Button::new("toggle-project-panel")
+                                    .w(px(28.0))
+                                    .h(px(28.0))
+                                    .p_0()
+                                    .icon(IconName::Menu)
+                                    .small()
+                                    .ghost()
+                                    .tooltip("显示或隐藏项目面板 · Alt 1")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.toggle_project_panel(cx);
+                                    })),
+                            )
+                            .child(
+                                div()
+                                    .w(px(26.0))
+                                    .h(px(26.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_md()
+                                    .bg(rgb(RAIL))
+                                    .text_xs()
+                                    .text_color(rgb(ACCENT_ON_RAIL))
+                                    .child("i"),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_baseline()
+                                    .gap_2()
+                                    .child(div().text_sm().text_color(rgb(INK)).child("ideall"))
+                                    .child(
+                                        div()
+                                            .text_size(px(9.0))
+                                            .text_color(rgb(INK_FAINT))
+                                            .child("WORKSPACE"),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        div().flex_1().flex().justify_center().child(
+                            Input::new(&self.search_input)
+                                .w(px(400.0))
+                                .small()
+                                .prefix(
+                                    div().pl_1().child(
+                                        Icon::new(IconName::Search)
+                                            .size(px(14.0))
+                                            .text_color(rgb(INK_FAINT)),
+                                    ),
+                                )
+                                .suffix(
+                                    div()
+                                        .pr_1()
+                                        .text_xs()
+                                        .text_color(rgb(INK_FAINT))
+                                        .child("Ctrl K"),
+                                )
+                                .cleanable(true),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .px_2()
+                                    .text_xs()
+                                    .text_color(rgb(INK_MUTED))
+                                    .child(
+                                        div().w(px(6.0)).h(px(6.0)).rounded_full().bg(rgb(ACCENT)),
+                                    )
+                                    .child("本地就绪"),
+                            )
+                            .child(
+                                Button::new("top-new-file")
+                                    .label("新建")
+                                    .icon(IconName::Plus)
+                                    .small()
+                                    .primary()
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.show_files(window, cx);
+                                        this.create_text_file(window, cx);
+                                    })),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_activity_item(
+        &self,
+        navigation: NavigationItem,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let section = navigation.section;
+        let selected = self.active_section.as_ref() == section
+            || (section == "我的" && matches!(self.active_section.as_ref(), "搜索" | "回收站"));
+        let icon = match section {
+            "我的" => IconName::FolderOpen,
+            "活动" => IconName::Calendar,
+            "浏览" => IconName::Globe,
+            "应用" => IconName::Bot,
+            "设置" => IconName::Settings2,
+            _ => IconName::LayoutDashboard,
+        };
+        let tooltip = if navigation.shortcut.is_empty() {
+            navigation.label.to_string()
+        } else {
+            format!("{} · {}", navigation.label, navigation.shortcut)
+        };
+
+        Button::new(SharedString::from(format!("section-{section}")))
+            .w(px(36.0))
+            .h(px(36.0))
+            .p_0()
+            .border_0()
+            .rounded_md()
+            .ghost()
+            .tooltip(tooltip)
+            .cursor_pointer()
+            .when(selected, |button| button.bg(rgb(RAIL_ACTIVE)))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.select_section(section, window, cx);
+            }))
+            .child(
+                div()
+                    .relative()
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(Icon::new(icon).size(px(19.0)).text_color(rgb(if selected {
+                        ACCENT_ON_RAIL
+                    } else {
+                        RAIL_MUTED
+                    })))
+                    .when(selected, |content| {
+                        content.child(
+                            div()
+                                .absolute()
+                                .left(px(-6.0))
+                                .top(px(9.0))
+                                .w(px(2.0))
+                                .h(px(18.0))
+                                .rounded_full()
+                                .bg(rgb(ACCENT_ON_RAIL)),
+                        )
+                    }),
             )
             .into_any_element()
     }
 
     fn render_activity_bar(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
         div()
-            .w(px(64.0))
+            .w(px(48.0))
             .h_full()
             .flex()
             .flex_col()
             .items_center()
-            .gap_1()
-            .p_2()
+            .p(px(6.0))
             .rounded_lg()
             .border_1()
-            .border_color(rgb(BORDER))
-            .bg(rgb(SURFACE))
-            .children(NAVIGATION.map(|navigation| {
-                let section = navigation.section;
-                let selected = self.active_section.as_ref() == section
-                    || (section == "我的"
-                        && matches!(self.active_section.as_ref(), "搜索" | "回收站"));
+            .border_color(rgb(RAIL))
+            .bg(rgb(RAIL))
+            .child(
                 div()
-                    .id(SharedString::from(format!("section-{section}")))
-                    .w(px(48.0))
-                    .h(px(48.0))
+                    .w_full()
                     .flex()
                     .flex_col()
                     .items_center()
-                    .justify_center()
-                    .gap_1()
-                    .rounded_lg()
-                    .cursor_pointer()
-                    .text_color(rgb(if selected { ACCENT } else { RAIL_MUTED }))
-                    .when(selected, |item| item.bg(rgb(RAIL_ACTIVE)))
-                    .hover(|item| item.bg(rgb(HOVER)))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.select_section(section, window, cx);
-                    }))
-                    .child(div().text_sm().child(navigation.icon))
-                    .child(div().text_size(px(10.0)).child(navigation.label))
-            }))
+                    .gap(px(4.0))
+                    .children(
+                        NAVIGATION[..3]
+                            .iter()
+                            .copied()
+                            .map(|navigation| self.render_activity_item(navigation, cx)),
+                    ),
+            )
             .child(div().flex_1())
             .child(
                 div()
-                    .px_2()
-                    .py_1()
-                    .rounded_md()
-                    .bg(rgb(SURFACE_MUTED))
-                    .text_size(px(9.0))
-                    .text_color(rgb(INK_FAINT))
-                    .child("GPUI"),
+                    .w(px(22.0))
+                    .h(px(1.0))
+                    .my(px(7.0))
+                    .bg(rgb(RAIL_ACTIVE)),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(4.0))
+                    .children(
+                        NAVIGATION[3..]
+                            .iter()
+                            .copied()
+                            .map(|navigation| self.render_activity_item(navigation, cx)),
+                    ),
             )
             .into_any_element()
     }
@@ -167,6 +245,9 @@ impl IdeallDesktop {
         let tree_selection = self.explorer.selection_id.clone();
         let can_create = !self.show_trash && self.active_section.as_ref() == "我的";
         let show_browse = self.active_section.as_ref() == "浏览";
+        let show_context = !matches!(self.active_section.as_ref(), "应用" | "设置");
+        let show_private_root = self.active_section.as_ref() == "回收站";
+        let show_trash_root = self.active_section.as_ref() == "我的";
         let empty_message: SharedString = match self.active_section.as_ref() {
             "搜索" => "未找到匹配的本地内容".into(),
             "回收站" => "回收站为空".into(),
@@ -176,11 +257,22 @@ impl IdeallDesktop {
             "设置" => "在编辑区管理同步、安全与更新".into(),
             _ => "项目为空，创建文件或导入本地内容".into(),
         };
-        let section_title = NAVIGATION
-            .iter()
-            .find(|navigation| navigation.section == self.active_section.as_ref())
-            .map(|navigation| navigation.label)
-            .unwrap_or(self.active_section.as_ref());
+        let section_title = match self.active_section.as_ref() {
+            "我的" => "私有页面",
+            "活动" => "最近更新",
+            "浏览" => "关注与书签",
+            "搜索" => "搜索结果",
+            "回收站" => "回收站",
+            section => section,
+        };
+        let section_icon = match self.active_section.as_ref() {
+            "我的" => IconName::FolderOpen,
+            "活动" => IconName::Calendar,
+            "浏览" => IconName::Globe,
+            "搜索" => IconName::Search,
+            "回收站" => IconName::Delete,
+            _ => IconName::FolderOpen,
+        };
 
         div()
             .w_full()
@@ -194,115 +286,27 @@ impl IdeallDesktop {
             .overflow_hidden()
             .child(
                 div()
-                    .h(px(52.0))
+                    .h(px(40.0))
                     .flex()
                     .items_center()
                     .gap_2()
-                    .px_4()
+                    .px_3()
                     .border_b_1()
                     .border_color(rgb(BORDER))
-                    .bg(rgb(SURFACE))
                     .child(
                         div()
                             .flex_1()
-                            .flex()
-                            .flex_col()
-                            .gap(px(2.0))
-                            .child(
-                                div()
-                                    .text_size(px(9.0))
-                                    .text_color(rgb(INK_FAINT))
-                                    .child(section_eyebrow(self.active_section.as_ref())),
-                            )
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(rgb(INK))
-                                    .child(section_title.to_string()),
-                            ),
+                            .text_xs()
+                            .text_color(rgb(INK_MUTED))
+                            .child("工作区"),
                     )
                     .child(
                         div()
-                            .px_2()
-                            .py(px(3.0))
-                            .rounded_md()
-                            .bg(rgb(SURFACE_MUTED))
                             .text_xs()
                             .text_color(rgb(INK_FAINT))
                             .child(item_count.to_string()),
-                    )
-                    .when(self.active_section.as_ref() == "我的", |header| {
-                        header
-                            .child(
-                                Button::new("collapse-project-tree")
-                                    .label("−")
-                                    .small()
-                                    .ghost()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.collapse_all_folders(cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new("expand-project-tree")
-                                    .label("+")
-                                    .small()
-                                    .ghost()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.expand_all_folders(cx);
-                                    })),
-                            )
-                    }),
+                    ),
             )
-            .when(can_create, |panel| {
-                panel.child(
-                    div()
-                        .h(px(44.0))
-                        .flex()
-                        .items_center()
-                        .gap_1()
-                        .px_3()
-                        .border_b_1()
-                        .border_color(rgb(BORDER))
-                        .bg(rgb(SURFACE_MUTED))
-                        .child(
-                            Button::new("project-new-note")
-                                .label("+ 笔记")
-                                .small()
-                                .ghost()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.create_note(window, cx);
-                                })),
-                        )
-                        .child(
-                            Button::new("project-new-file")
-                                .label("+ 文件")
-                                .small()
-                                .ghost()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.create_text_file(window, cx);
-                                })),
-                        )
-                        .child(
-                            Button::new("project-new-folder")
-                                .label("+ 目录")
-                                .small()
-                                .ghost()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.create_folder(window, cx);
-                                })),
-                        )
-                        .child(div().flex_1())
-                        .child(
-                            Button::new("project-import")
-                                .label("导入")
-                                .small()
-                                .ghost()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.import_files(cx);
-                                })),
-                        ),
-                )
-            })
             .when(show_browse, |panel| {
                 panel.child(
                     div()
@@ -316,21 +320,26 @@ impl IdeallDesktop {
                         .child(
                             div()
                                 .flex()
-                                .gap_1()
+                                .flex_col()
+                                .gap(px(2.0))
                                 .child(
                                     Button::new("new-feed")
-                                        .label("+ 关注")
-                                        .small()
+                                        .w_full()
+                                        .h(px(32.0))
+                                        .p_0()
                                         .primary()
+                                        .child(activity_action_content("+", "新增关注"))
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.create_feed(window, cx);
                                         })),
                                 )
                                 .child(
                                     Button::new("open-info-portal")
-                                        .label("资讯")
-                                        .small()
+                                        .w_full()
+                                        .h(px(32.0))
+                                        .p_0()
                                         .ghost()
+                                        .child(activity_action_content("◫", "资讯"))
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.open_portal(
                                                 "ideall.info",
@@ -342,9 +351,11 @@ impl IdeallDesktop {
                                 )
                                 .child(
                                     Button::new("open-community-portal")
-                                        .label("社区")
-                                        .small()
+                                        .w_full()
+                                        .h(px(32.0))
+                                        .p_0()
                                         .ghost()
+                                        .child(activity_action_content("◌", "社区"))
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.open_portal(
                                                 "ideall.community",
@@ -357,261 +368,357 @@ impl IdeallDesktop {
                         ),
                 )
             })
-            .when(
-                matches!(
-                    self.active_section.as_ref(),
-                    "我的" | "搜索" | "活动" | "浏览" | "回收站"
-                ),
-                |panel| {
-                    panel.child(
-                        div()
-                            .h(px(38.0))
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .px_3()
-                            .border_b_1()
-                            .border_color(rgb(BORDER))
-                            .child(
-                                Button::new("project-home")
-                                    .label("项目")
-                                    .small()
-                                    .ghost()
-                                    .selected(!self.show_trash)
+            .when(show_context, |panel| {
+                panel.child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .p_2()
+                        .overflow_y_scrollbar()
+                        .when(can_create, |list| {
+                            list.drag_over::<DraggedNode>(|style, _, _, _| {
+                                style.bg(rgb(ACCENT_SOFT))
+                            })
+                            .on_drop(cx.listener(
+                                |this, node: &DraggedNode, _, cx| {
+                                    this.move_explorer_node(node.id.clone(), None, cx);
+                                },
+                            ))
+                        })
+                        .when(show_private_root, |list| {
+                            list.child(
+                                div()
+                                    .id("tree-root-private")
+                                    .h(px(32.0))
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .px_2()
+                                    .rounded_md()
+                                    .cursor_pointer()
+                                    .text_sm()
+                                    .text_color(rgb(INK_MUTED))
+                                    .hover(|row| row.bg(rgb(HOVER)))
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.show_files(window, cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new("project-trash")
-                                    .label("回收站")
-                                    .small()
-                                    .ghost()
-                                    .selected(self.show_trash)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.show_trash(window, cx);
-                                    })),
-                            ),
-                    )
-                },
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .p_2()
-                    .overflow_y_scrollbar()
-                    .when(items.is_empty(), |list| {
-                        list.child(
-                            div()
-                                .m_3()
-                                .p_3()
-                                .rounded_md()
-                                .border_1()
-                                .border_color(rgb(BORDER))
-                                .text_sm()
-                                .text_color(rgb(INK_MUTED))
-                                .child(empty_message),
-                        )
-                    })
-                    .children(items.into_iter().map(|item| {
-                        let id = item.id.clone();
-                        let is_folder = item.kind == NodeKind::Folder;
-                        let selected = tree_selection.as_deref() == Some(id.as_str())
-                            || (!is_folder
-                                && self.editor.selected_id.as_deref() == Some(id.as_str()));
-                        let expanded = self.explorer.expanded_folders.contains(&id);
-                        let renaming = self.explorer.renaming_id.as_deref() == Some(id.as_str());
-                        let rename_input = self.explorer.rename_input.clone();
-                        let child_count = all_items
-                            .iter()
-                            .filter(|candidate| candidate.parent_id.as_deref() == Some(id.as_str()))
-                            .count();
-                        let click_id = id.clone();
-                        let context_id = id.clone();
-                        let folder_id = id.clone();
-                        div()
-                            .id(SharedString::from(format!("node-{id}")))
-                            .h(px(32.0))
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .pr_2()
-                            .pl(px(8.0 + item.depth as f32 * 14.0))
-                            .rounded_md()
-                            .cursor_pointer()
-                            .text_sm()
-                            .when(selected, |row| {
-                                row.bg(rgb(SELECTION)).text_color(rgb(RAIL_INK))
-                            })
-                            .hover(|row| row.bg(rgb(HOVER)))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                if is_folder {
-                                    this.toggle_folder(click_id.clone(), cx);
-                                } else {
-                                    this.open_node(click_id.clone(), window, cx);
-                                }
-                            }))
-                            .on_mouse_down(
-                                MouseButton::Right,
-                                cx.listener(move |this, _, _, cx| {
-                                    this.explorer.select(context_id.clone());
-                                    cx.notify();
-                                }),
-                            )
-                            .on_drag(
-                                DraggedNode {
-                                    id: id.clone(),
-                                    title: item.title.clone(),
-                                },
-                                |node: &DraggedNode, _, _, cx| cx.new(|_| node.clone()),
-                            )
-                            .when(is_folder, |row| {
-                                row.drag_over::<DraggedNode>(|style, _, _, _| {
-                                    style.bg(rgb(ACCENT_SOFT))
-                                })
-                                .on_drop(cx.listener(
-                                    move |this, node: &DraggedNode, _, cx| {
-                                        this.move_explorer_node(
-                                            node.id.clone(),
-                                            Some(folder_id.clone()),
-                                            cx,
-                                        );
-                                    },
-                                ))
-                            })
-                            .child(
-                                div()
-                                    .w(px(14.0))
-                                    .text_xs()
-                                    .text_color(rgb(INK_FAINT))
-                                    .child(if is_folder {
-                                        if expanded { "⌄" } else { "›" }
-                                    } else {
-                                        ""
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .w(px(18.0))
-                                    .text_xs()
-                                    .text_color(rgb(kind_color(item.kind)))
-                                    .child(kind_icon(item.kind)),
-                            )
-                            .when(renaming, |row| {
-                                row.child(
-                                    Input::new(
-                                        rename_input
-                                            .as_ref()
-                                            .expect("rename input is present while renaming"),
+                                    }))
+                                    .child(
+                                        Icon::new(IconName::ChevronRight)
+                                            .size(px(14.0))
+                                            .text_color(rgb(INK_FAINT)),
                                     )
-                                    .w_full()
-                                    .small()
-                                    .appearance(false),
-                                )
+                                    .child(
+                                        Icon::new(IconName::FolderClosed)
+                                            .size(px(16.0))
+                                            .text_color(rgb(kind_color(NodeKind::Folder))),
+                                    )
+                                    .child("私有页面"),
+                            )
+                        })
+                        .child(
+                            div()
+                                .id("tree-root-active")
+                                .h(px(32.0))
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .px_2()
+                                .rounded_md()
+                                .bg(rgb(ACCENT_SOFT))
+                                .text_sm()
+                                .text_color(rgb(INK))
+                                .when(can_create, |row| {
+                                    row.drag_over::<DraggedNode>(|style, _, _, _| {
+                                        style.bg(rgb(SELECTION))
+                                    })
+                                    .on_drop(cx.listener(
+                                        |this, node: &DraggedNode, _, cx| {
+                                            this.move_explorer_node(node.id.clone(), None, cx);
+                                        },
+                                    ))
+                                })
                                 .child(
-                                    Button::new(SharedString::from(format!("commit-rename-{id}")))
-                                        .label("✓")
-                                        .small()
-                                        .ghost()
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            cx.stop_propagation();
-                                            this.commit_explorer_rename(window, cx);
-                                        })),
+                                    Icon::new(IconName::ChevronDown)
+                                        .size(px(14.0))
+                                        .text_color(rgb(INK_FAINT)),
                                 )
+                                .child(Icon::new(section_icon).size(px(16.0)).text_color(rgb(
+                                    if can_create {
+                                        kind_color(NodeKind::Folder)
+                                    } else {
+                                        ACCENT
+                                    },
+                                )))
                                 .child(
-                                    Button::new(SharedString::from(format!("cancel-rename-{id}")))
-                                        .label("×")
-                                        .small()
-                                        .ghost()
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            cx.stop_propagation();
-                                            this.cancel_explorer_rename(cx);
-                                        })),
-                                )
-                            })
-                            .when(!renaming, |row| {
-                                row.child(
                                     div()
                                         .flex_1()
                                         .overflow_hidden()
                                         .text_ellipsis()
                                         .whitespace_nowrap()
-                                        .child(item.title),
+                                        .child(section_title.to_string()),
                                 )
-                            })
-                            .when(is_folder && child_count > 0, |row| {
-                                row.child(
+                                .child(
                                     div()
                                         .text_xs()
                                         .text_color(rgb(INK_FAINT))
-                                        .child(child_count.to_string()),
+                                        .child(item_count.to_string()),
                                 )
-                            })
-                            .context_menu(move |menu, _, _| {
-                                menu.menu("打开", Box::new(OpenSelectedNode))
-                                    .menu("重命名  F2", Box::new(RenameSelectedNode))
-                                    .menu_with_disabled(
-                                        "移到回收站  Delete",
-                                        Box::new(TrashSelectedNode),
-                                        !can_create,
+                                .when(can_create, |row| {
+                                    row.child(
+                                        Button::new("tree-root-new-note")
+                                            .w(px(22.0))
+                                            .h(px(22.0))
+                                            .p_0()
+                                            .small()
+                                            .ghost()
+                                            .icon(IconName::Plus)
+                                            .tooltip("在根目录新建页面")
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.explorer.clear_selection();
+                                                this.create_note(window, cx);
+                                            })),
                                     )
-                            })
-                    })),
-            )
-            .when(can_create && tree_selection.is_some(), |panel| {
-                panel.child(
-                    div()
-                        .h(px(38.0))
-                        .flex()
-                        .items_center()
-                        .gap_1()
-                        .px_3()
-                        .border_t_1()
-                        .border_color(rgb(BORDER))
-                        .drag_over::<DraggedNode>(|style, _, _, _| style.bg(rgb(ACCENT_SOFT)))
-                        .on_drop(cx.listener(|this, node: &DraggedNode, _, cx| {
-                            this.move_explorer_node(node.id.clone(), None, cx);
-                        }))
-                        .child(
-                            Button::new("rename-selected-node")
-                                .label("重命名")
-                                .small()
-                                .ghost()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.begin_selected_explorer_rename(window, cx);
-                                })),
+                                    .child(
+                                        Button::new("tree-root-more")
+                                            .w(px(22.0))
+                                            .h(px(22.0))
+                                            .p_0()
+                                            .small()
+                                            .ghost()
+                                            .icon(IconName::Ellipsis)
+                                            .tooltip("更多根目录操作")
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                cx.listener(|this, _, _, cx| {
+                                                    this.explorer.clear_selection();
+                                                    cx.notify();
+                                                }),
+                                            )
+                                            .dropdown_menu(|menu, _, _| {
+                                                menu.menu("新建页面", Box::new(NewNote))
+                                                    .menu("新建文本文件", Box::new(NewTextFile))
+                                                    .menu("新建目录", Box::new(NewFolder))
+                                                    .separator()
+                                                    .menu("导入文件", Box::new(ImportFiles))
+                                            }),
+                                    )
+                                }),
                         )
-                        .child(
-                            Button::new("trash-selected-node")
-                                .label("删除")
-                                .small()
-                                .ghost()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.move_explorer_selection_to_trash(window, cx);
-                                })),
-                        )
-                        .child(div().flex_1())
-                        .child(
+                        .when(items.is_empty(), |list| {
+                            list.child(
+                                div()
+                                    .ml(px(22.0))
+                                    .mt_1()
+                                    .px_2()
+                                    .py_3()
+                                    .text_xs()
+                                    .text_color(rgb(INK_FAINT))
+                                    .child(empty_message.clone()),
+                            )
+                        })
+                        .children(items.into_iter().map(|item| {
+                            let id = item.id.clone();
+                            let is_folder = item.kind == NodeKind::Folder;
+                            let selected = tree_selection.as_deref() == Some(id.as_str())
+                                || (!is_folder
+                                    && self.editor.selected_id.as_deref() == Some(id.as_str()));
+                            let expanded = self.explorer.expanded_folders.contains(&id);
+                            let renaming =
+                                self.explorer.renaming_id.as_deref() == Some(id.as_str());
+                            let rename_input = self.explorer.rename_input.clone();
+                            let child_count = all_items
+                                .iter()
+                                .filter(|candidate| {
+                                    candidate.parent_id.as_deref() == Some(id.as_str())
+                                })
+                                .count();
+                            let click_id = id.clone();
+                            let context_id = id.clone();
+                            let folder_id = id.clone();
                             div()
-                                .text_xs()
-                                .text_color(rgb(INK_FAINT))
-                                .child("拖到此处移至根目录"),
-                        ),
+                                .id(SharedString::from(format!("node-{id}")))
+                                .h(px(30.0))
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .pr_2()
+                                .pl(px(22.0 + item.depth as f32 * 14.0))
+                                .rounded_md()
+                                .cursor_pointer()
+                                .text_sm()
+                                .when(selected, |row| row.bg(rgb(SELECTION)).text_color(rgb(INK)))
+                                .hover(|row| row.bg(rgb(HOVER)))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    if is_folder {
+                                        this.toggle_folder(click_id.clone(), cx);
+                                    } else {
+                                        this.open_node(click_id.clone(), window, cx);
+                                    }
+                                }))
+                                .on_mouse_down(
+                                    MouseButton::Right,
+                                    cx.listener(move |this, _, _, cx| {
+                                        this.explorer.select(context_id.clone());
+                                        cx.notify();
+                                    }),
+                                )
+                                .on_drag(
+                                    DraggedNode {
+                                        id: id.clone(),
+                                        title: item.title.clone(),
+                                    },
+                                    |node: &DraggedNode, _, _, cx| cx.new(|_| node.clone()),
+                                )
+                                .when(is_folder, |row| {
+                                    row.drag_over::<DraggedNode>(|style, _, _, _| {
+                                        style.bg(rgb(ACCENT_SOFT))
+                                    })
+                                    .on_drop(cx.listener(
+                                        move |this, node: &DraggedNode, _, cx| {
+                                            this.move_explorer_node(
+                                                node.id.clone(),
+                                                Some(folder_id.clone()),
+                                                cx,
+                                            );
+                                        },
+                                    ))
+                                })
+                                .child(
+                                    div()
+                                        .w(px(14.0))
+                                        .text_xs()
+                                        .text_color(rgb(INK_FAINT))
+                                        .child(if is_folder {
+                                            if expanded { "⌄" } else { "›" }
+                                        } else {
+                                            ""
+                                        }),
+                                )
+                                .child(
+                                    div()
+                                        .w(px(18.0))
+                                        .text_xs()
+                                        .text_color(rgb(kind_color(item.kind)))
+                                        .child(kind_icon(item.kind)),
+                                )
+                                .when(renaming, |row| {
+                                    row.child(
+                                        Input::new(
+                                            rename_input
+                                                .as_ref()
+                                                .expect("rename input is present while renaming"),
+                                        )
+                                        .w_full()
+                                        .small()
+                                        .appearance(false),
+                                    )
+                                    .child(
+                                        Button::new(SharedString::from(format!(
+                                            "commit-rename-{id}"
+                                        )))
+                                        .label("✓")
+                                        .small()
+                                        .ghost()
+                                        .on_click(
+                                            cx.listener(|this, _, window, cx| {
+                                                cx.stop_propagation();
+                                                this.commit_explorer_rename(window, cx);
+                                            }),
+                                        ),
+                                    )
+                                    .child(
+                                        Button::new(SharedString::from(format!(
+                                            "cancel-rename-{id}"
+                                        )))
+                                        .label("×")
+                                        .small()
+                                        .ghost()
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| {
+                                                cx.stop_propagation();
+                                                this.cancel_explorer_rename(cx);
+                                            }),
+                                        ),
+                                    )
+                                })
+                                .when(!renaming, |row| {
+                                    row.child(
+                                        div()
+                                            .flex_1()
+                                            .overflow_hidden()
+                                            .text_ellipsis()
+                                            .whitespace_nowrap()
+                                            .child(item.title),
+                                    )
+                                })
+                                .when(is_folder && child_count > 0, |row| {
+                                    row.child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(rgb(INK_FAINT))
+                                            .child(child_count.to_string()),
+                                    )
+                                })
+                                .context_menu(move |menu, _, _| {
+                                    menu.menu("打开", Box::new(OpenSelectedNode))
+                                        .when(is_folder && can_create, |menu| {
+                                            menu.separator()
+                                                .menu("新建页面", Box::new(NewNote))
+                                                .menu("新建文本文件", Box::new(NewTextFile))
+                                                .menu("新建子目录", Box::new(NewFolder))
+                                                .menu("导入到此目录", Box::new(ImportFiles))
+                                        })
+                                        .menu("重命名  F2", Box::new(RenameSelectedNode))
+                                        .menu_with_disabled(
+                                            "移到回收站  Delete",
+                                            Box::new(TrashSelectedNode),
+                                            !can_create,
+                                        )
+                                })
+                        }))
+                        .when(show_trash_root, |list| {
+                            list.child(
+                                div()
+                                    .id("tree-root-trash")
+                                    .h(px(32.0))
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .px_2()
+                                    .mt_1()
+                                    .rounded_md()
+                                    .cursor_pointer()
+                                    .text_sm()
+                                    .text_color(rgb(INK_MUTED))
+                                    .hover(|row| row.bg(rgb(HOVER)))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.show_trash(window, cx);
+                                    }))
+                                    .child(
+                                        Icon::new(IconName::ChevronRight)
+                                            .size(px(14.0))
+                                            .text_color(rgb(INK_FAINT)),
+                                    )
+                                    .child(
+                                        Icon::new(IconName::Delete)
+                                            .size(px(16.0))
+                                            .text_color(rgb(INK_FAINT)),
+                                    )
+                                    .child("回收站"),
+                            )
+                        }),
                 )
             })
-            .child(
-                div()
-                    .h(px(30.0))
-                    .flex()
-                    .items_center()
-                    .px_4()
-                    .border_t_1()
-                    .border_color(rgb(BORDER))
-                    .text_xs()
-                    .text_color(rgb(INK_FAINT))
-                    .child(section_description(self.active_section.as_ref())),
-            )
+            .when(!show_context, |panel| {
+                panel.child(
+                    div()
+                        .flex_1()
+                        .p_4()
+                        .text_sm()
+                        .text_color(rgb(INK_MUTED))
+                        .child(empty_message),
+                )
+            })
             .into_any_element()
     }
 
@@ -626,7 +733,7 @@ impl IdeallDesktop {
             .flex()
             .flex_none()
             .items_center()
-            .gap_1()
+            .gap(px(2.0))
             .px_1()
             .children(tabs.into_iter().map(|tab| {
                 let id = tab_key(&tab);
@@ -635,9 +742,10 @@ impl IdeallDesktop {
                 let dirty = selected && self.editor.dirty;
                 div()
                     .id(SharedString::from(format!("tab-{id}")))
-                    .h(px(34.0))
-                    .min_w(px(132.0))
-                    .max_w(px(230.0))
+                    .relative()
+                    .h(px(32.0))
+                    .min_w(px(112.0))
+                    .max_w(px(200.0))
                     .flex()
                     .items_center()
                     .gap_2()
@@ -647,9 +755,16 @@ impl IdeallDesktop {
                     .text_sm()
                     .text_color(rgb(if selected { INK } else { INK_MUTED }))
                     .when(selected, |item| {
-                        item.bg(rgb(SURFACE))
-                            .border_1()
-                            .border_color(rgb(BORDER_STRONG))
+                        item.bg(rgb(SURFACE)).child(
+                            div()
+                                .absolute()
+                                .bottom(px(0.0))
+                                .left(px(14.0))
+                                .right(px(14.0))
+                                .h(px(2.0))
+                                .rounded_full()
+                                .bg(rgb(ACCENT)),
+                        )
                     })
                     .hover(|item| item.bg(rgb(HOVER)))
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -689,7 +804,7 @@ impl IdeallDesktop {
         // wrapper owns the outer dimensions and otherwise resets the wrapped
         // element's layout style.
         div()
-            .h(px(44.0))
+            .h(px(38.0))
             .border_b_1()
             .border_color(rgb(BORDER))
             .bg(rgb(SURFACE_MUTED))
@@ -705,15 +820,15 @@ impl IdeallDesktop {
             .flex()
             .items_center()
             .justify_center()
-            .bg(rgb(EDITOR))
+            .p_6()
+            .bg(rgb(SURFACE))
             .child(
                 div()
                     .w_full()
-                    .max_w(px(760.0))
-                    .px_8()
+                    .max_w(px(680.0))
                     .flex()
                     .flex_col()
-                    .gap_6()
+                    .gap_5()
                     .child(
                         div()
                             .flex()
@@ -721,15 +836,15 @@ impl IdeallDesktop {
                             .gap_4()
                             .child(
                                 div()
-                                    .w(px(54.0))
-                                    .h(px(54.0))
+                                    .w(px(46.0))
+                                    .h(px(46.0))
                                     .rounded_lg()
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .bg(rgb(ACCENT))
-                                    .text_2xl()
-                                    .text_color(rgb(0xffffff))
+                                    .bg(rgb(RAIL))
+                                    .text_xl()
+                                    .text_color(rgb(ACCENT_ON_RAIL))
                                     .child("i"),
                             )
                             .child(
@@ -737,20 +852,27 @@ impl IdeallDesktop {
                                     .flex()
                                     .flex_col()
                                     .gap_1()
-                                    .child(div().text_2xl().child("ideall 工作台"))
+                                    .child(div().text_xl().child("开始创作"))
                                     .child(
                                         div()
                                             .text_sm()
                                             .text_color(rgb(INK_MUTED))
-                                            .child("本地优先的文件、笔记与智能工具空间"),
+                                            .child("在本地工作区组织文件、笔记和智能任务"),
                                     ),
                             ),
                     )
                     .child(
                         div()
+                            .pb_1()
+                            .text_xs()
+                            .text_color(rgb(INK_FAINT))
+                            .child("快速开始"),
+                    )
+                    .child(
+                        div()
                             .grid()
                             .grid_cols(2)
-                            .gap_3()
+                            .gap_2()
                             .child(
                                 welcome_action("welcome-new-file", "+", "新建文件", "Ctrl ⇧ N")
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -781,14 +903,22 @@ impl IdeallDesktop {
                         div()
                             .flex()
                             .items_center()
-                            .justify_between()
                             .pt_3()
                             .border_t_1()
                             .border_color(rgb(BORDER))
                             .text_xs()
                             .text_color(rgb(INK_FAINT))
-                            .child("所有内容保存在本机 SQLite 与私有 Blob 存储")
-                            .child("搜索 Ctrl K · 项目 Alt 1 · 保存 Ctrl S"),
+                            .child(
+                                div()
+                                    .w(px(6.0))
+                                    .h(px(6.0))
+                                    .mr_2()
+                                    .rounded_full()
+                                    .bg(rgb(ACCENT)),
+                            )
+                            .child("数据保存在本机")
+                            .child(div().flex_1())
+                            .child("搜索 Ctrl K · 保存 Ctrl S"),
                     ),
             )
             .into_any_element()
@@ -806,19 +936,19 @@ impl IdeallDesktop {
             .flex_1()
             .min_h_0()
             .overflow_y_scrollbar()
-            .bg(rgb(EDITOR))
+            .bg(rgb(CANVAS))
             .child(
                 div()
                     .w_full()
-                    .max_w(px(980.0))
+                    .max_w(px(920.0))
                     .mx_auto()
                     .p_6()
                     .flex()
                     .flex_col()
                     .gap_4()
                     .child(page_heading(
-                        "Agent 与原生 Engine",
-                        "配置本机模型、外部 ACP 进程与受审计的工具调用。",
+                        "Agent 工作台",
+                        "连接模型、编排本机工具，并保留每一次写操作审计。",
                     ))
                     .child(
                         settings_card("模型连接 · OpenAI-compatible")
@@ -1078,7 +1208,7 @@ impl IdeallDesktop {
             .flex_1()
             .min_h_0()
             .overflow_y_scrollbar()
-            .bg(rgb(EDITOR))
+            .bg(rgb(CANVAS))
             .child(
                 div()
                     .w_full()
@@ -1209,9 +1339,7 @@ impl IdeallDesktop {
             self.editor.selected_kind,
             Some(NodeKind::Note | NodeKind::Bookmark | NodeKind::File)
         );
-        let embedded_browser = self.browser.webview();
-        let editor_mode = self.editor.mode(embedded_browser.is_some());
-        let show_browser = editor_mode == EditorMode::Browser;
+        let editor_mode = self.editor.mode();
         let show_code = editor_mode == EditorMode::Code;
         let show_preview = editor_mode == EditorMode::Preview;
         let engine_capabilities = engine_runtime_capabilities(EnginePlatform::current_desktop());
@@ -1233,19 +1361,8 @@ impl IdeallDesktop {
         let preview = TextView::markdown("active-file-preview", note_text.clone(), window, cx)
             .selectable(true)
             .scrollable(true);
-        let language = self
-            .editor
-            .selected_id
-            .as_deref()
-            .map(|id| code_language_for_node(&self.service, id))
-            .unwrap_or("text");
-        let active_text = self.editor.active_text(cx);
-        let cursor = self.editor.cursor_position(cx);
-        let note_toolbar_visible = self.note_editor_available()
-            && !show_browser
-            && !show_code
-            && !show_preview
-            && !show_delegated_engine;
+        let note_toolbar_visible =
+            self.note_editor_available() && !show_code && !show_preview && !show_delegated_engine;
         let slash_commands = (note_toolbar_visible && self.note_editor_focused(window, cx))
             .then(|| {
                 let cursor = self.editor.body_input.read(cx).cursor_position();
@@ -1254,11 +1371,6 @@ impl IdeallDesktop {
             })
             .flatten()
             .unwrap_or_default();
-        let line_ending = if active_text.contains("\r\n") {
-            "CRLF"
-        } else {
-            "LF"
-        };
         let find_match_count = self.editor.find_match_count(cx);
 
         div()
@@ -1269,24 +1381,15 @@ impl IdeallDesktop {
             .bg(rgb(EDITOR))
             .child(
                 div()
-                    .h(px(48.0))
+                    .h(px(42.0))
                     .flex()
                     .items_center()
                     .gap_2()
-                    .px_4()
+                    .px_3()
                     .border_b_1()
                     .border_color(rgb(BORDER))
                     .bg(rgb(SURFACE))
-                    .child(
-                        div()
-                            .px_2()
-                            .py(px(4.0))
-                            .rounded_md()
-                            .bg(rgb(SURFACE_MUTED))
-                            .text_xs()
-                            .text_color(rgb(INK_MUTED))
-                            .child("项目"),
-                    )
+                    .child(div().text_xs().text_color(rgb(INK_FAINT)).child("项目"))
                     .child(div().text_color(rgb(INK_FAINT)).child("›"))
                     .child(
                         div()
@@ -1335,7 +1438,6 @@ impl IdeallDesktop {
                                     .label("浏览器")
                                     .small()
                                     .ghost()
-                                    .selected(show_browser)
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.set_engine_preference("ideall.browser", window, cx);
                                     })),
@@ -1344,7 +1446,8 @@ impl IdeallDesktop {
                     )
                     .child(
                         Button::new("editor-find")
-                            .label("查找")
+                            .label("⌕")
+                            .tooltip("在当前文档中查找 · Ctrl/⌘ F")
                             .small()
                             .ghost()
                             .selected(self.editor.find_visible)
@@ -1352,26 +1455,33 @@ impl IdeallDesktop {
                                 this.show_editor_find(false, window, cx);
                             })),
                     )
-                    .child(
-                        Button::new("editor-save")
-                            .label(if self.editor.dirty {
-                                "保存"
-                            } else {
-                                "已保存"
-                            })
-                            .small()
-                            .primary()
-                            .disabled(!self.editor.dirty)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.save(window, cx);
-                            })),
-                    )
+                    .when(self.editor.dirty, |toolbar| {
+                        toolbar.child(
+                            Button::new("editor-save")
+                                .label("保存")
+                                .small()
+                                .primary()
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.save(window, cx);
+                                })),
+                        )
+                    })
+                    .when(!self.editor.dirty, |toolbar| {
+                        toolbar.child(
+                            div()
+                                .px_2()
+                                .text_xs()
+                                .text_color(rgb(INK_FAINT))
+                                .child("已保存"),
+                        )
+                    })
                     .when(
                         !self.show_trash && self.editor.selected_kind == Some(NodeKind::File),
                         |toolbar| {
                             toolbar.child(
                                 Button::new("open-file-system")
-                                    .label("系统打开")
+                                    .label("打开")
+                                    .tooltip("使用系统应用打开只读副本")
                                     .small()
                                     .ghost()
                                     .on_click(cx.listener(|this, _, _, cx| {
@@ -1385,7 +1495,8 @@ impl IdeallDesktop {
                         |toolbar| {
                             toolbar.child(
                                 Button::new("open-bookmark")
-                                    .label("外部打开")
+                                    .label("打开")
+                                    .tooltip("在系统浏览器中打开")
                                     .small()
                                     .ghost()
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -1397,7 +1508,7 @@ impl IdeallDesktop {
             )
             .child(
                 div()
-                    .h(px(if note_toolbar_visible { 88.0 } else { 52.0 }))
+                    .h(px(if note_toolbar_visible { 84.0 } else { 50.0 }))
                     .flex()
                     .items_center()
                     .border_b_1()
@@ -1408,9 +1519,9 @@ impl IdeallDesktop {
                             .w_full()
                             .when(note_toolbar_visible, |title| {
                                 title
-                                    .max_w(px(880.0))
+                                    .max_w(px(760.0))
                                     .mx_auto()
-                                    .px_10()
+                                    .px_6()
                                     .flex()
                                     .flex_col()
                                     .justify_center()
@@ -1426,7 +1537,7 @@ impl IdeallDesktop {
                             .child(
                                 Input::new(&self.editor.title_input)
                                     .w_full()
-                                    .h(px(if note_toolbar_visible { 48.0 } else { 38.0 }))
+                                    .h(px(if note_toolbar_visible { 48.0 } else { 36.0 }))
                                     .when(note_toolbar_visible, |input| input.large())
                                     .appearance(false)
                                     .bordered(false)
@@ -1521,13 +1632,6 @@ impl IdeallDesktop {
                     .flex_col()
                     .relative()
                     .bg(rgb(EDITOR))
-                    .when(show_browser, |body| {
-                        body.child(
-                            embedded_browser
-                                .clone()
-                                .expect("browser WebView is present when rendered"),
-                        )
-                    })
                     .when(show_code, |body| {
                         body.child(
                             Input::new(&self.editor.code_input)
@@ -1601,8 +1705,7 @@ impl IdeallDesktop {
                         )
                     })
                     .when(
-                        !show_browser
-                            && !show_code
+                        !show_code
                             && !show_preview
                             && !show_delegated_engine
                             && self.editor.selected_kind == Some(NodeKind::Note),
@@ -1612,10 +1715,10 @@ impl IdeallDesktop {
                                     .flex_1()
                                     .min_h_0()
                                     .w_full()
-                                    .max_w(px(880.0))
+                                    .max_w(px(760.0))
                                     .mx_auto()
-                                    .px_10()
-                                    .py_8()
+                                    .px_6()
+                                    .py_5()
                                     .child(
                                         Input::new(&self.editor.body_input)
                                             .h_full()
@@ -1630,8 +1733,7 @@ impl IdeallDesktop {
                         },
                     )
                     .when(
-                        !show_browser
-                            && !show_code
+                        !show_code
                             && !show_preview
                             && !show_delegated_engine
                             && self.editor.selected_kind != Some(NodeKind::Note),
@@ -1650,69 +1752,40 @@ impl IdeallDesktop {
                         body.child(self.render_note_slash_menu(slash_commands, cx))
                     }),
             )
-            .child(
-                div()
-                    .h(px(30.0))
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .px_4()
-                    .border_t_1()
-                    .border_color(rgb(BORDER))
-                    .bg(rgb(SURFACE))
-                    .text_xs()
-                    .text_color(rgb(INK_MUTED))
-                    .child(self.status.clone().unwrap_or_else(|| {
-                        if self.editor.dirty {
-                            "等待自动保存…".into()
-                        } else {
-                            "本地文件已同步到磁盘".into()
-                        }
-                    }))
-                    .child(div().flex_1())
-                    .child(if self.editor.body_editable {
-                        "可编辑"
-                    } else {
-                        "只读"
-                    })
-                    .child(language)
-                    .child("UTF-8")
-                    .child(line_ending)
-                    .child(format!(
-                        "行 {}，列 {}",
-                        cursor.line.saturating_add(1),
-                        cursor.character.saturating_add(1)
-                    ))
-                    .child(format!("{} 字符", active_text.chars().count()))
-                    .when(self.show_trash, |status| {
-                        status
-                            .child(Button::new("restore").label("恢复").small().on_click(
-                                cx.listener(|this, _, window, cx| {
-                                    this.restore_selected(window, cx);
-                                }),
-                            ))
-                            .child(
-                                Button::new("purge")
-                                    .label("永久删除")
-                                    .small()
-                                    .danger()
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.confirm_purge(window, cx);
-                                    })),
-                            )
-                    })
-                    .when(!self.show_trash, |status| {
-                        status.child(
-                            Button::new("trash")
-                                .label("移到回收站")
+            .when(self.show_trash, |editor| {
+                editor.child(
+                    div()
+                        .h(px(42.0))
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .px_4()
+                        .border_t_1()
+                        .border_color(rgb(BORDER))
+                        .bg(rgb(SURFACE_MUTED))
+                        .text_sm()
+                        .text_color(rgb(INK_MUTED))
+                        .child("此项目位于回收站")
+                        .child(div().flex_1())
+                        .child(
+                            Button::new("restore")
+                                .label("恢复")
                                 .small()
-                                .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    this.move_selected_to_trash(window, cx);
+                                    this.restore_selected(window, cx);
                                 })),
                         )
-                    }),
-            )
+                        .child(
+                            Button::new("purge")
+                                .label("永久删除")
+                                .small()
+                                .danger()
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.confirm_purge(window, cx);
+                                })),
+                        ),
+                )
+            })
             .into_any_element()
     }
 }
@@ -1724,19 +1797,24 @@ impl Render for IdeallDesktop {
         let has_selection = self.editor.has_selection();
         let show_settings = !has_selection && self.active_section.as_ref() == "设置";
         let show_apps = !has_selection && self.active_section.as_ref() == "应用";
-        let remote_browser = self.browser.webview();
-        let show_remote_webview = !has_selection
-            && remote_browser.is_some()
-            && matches!(
-                self.editor.active_engine_id.as_deref(),
-                Some("ideall.info" | "ideall.community")
-            );
+        let active_browser_surface = browser_surface(
+            self.editor.active_engine_id.as_deref(),
+            self.editor.selected_kind,
+        );
+        let show_browser_surface = active_browser_surface.is_some();
         let engine_capabilities =
             engine_runtime_capabilities(EnginePlatform::current_desktop()).to_vec();
         let agent_threads = self.agent_threads.clone();
         let agent_transcript = self.agent_transcript.clone();
         let agent_audits = self.agent_audits.clone();
         let available_update = self.available_update.clone();
+        let workspace_status = self.status.clone().unwrap_or_else(|| {
+            if self.editor.dirty {
+                "正在保存更改…".into()
+            } else {
+                "更改已保存在本机".into()
+            }
+        });
         let resize_state = self
             .explorer
             .resize_state
@@ -1749,7 +1827,7 @@ impl Render for IdeallDesktop {
             .h_full()
             .flex()
             .flex_col()
-            .ml_2()
+            .ml(px(8.0))
             .rounded_lg()
             .border_1()
             .border_color(rgb(BORDER))
@@ -1757,15 +1835,14 @@ impl Render for IdeallDesktop {
             .overflow_hidden()
             .child(self.render_tab_bar(tabs, active_tab, cx))
             .when(
-                !has_selection && !show_settings && !show_apps && !show_remote_webview,
+                !has_selection && !show_settings && !show_apps && !show_browser_surface,
                 |content| content.child(self.render_welcome(cx)),
             )
-            .when(show_remote_webview, |content| {
-                content.child(
-                    remote_browser
-                        .clone()
-                        .expect("remote WebView is present when rendered"),
-                )
+            .when(show_browser_surface, |content| {
+                content.child(self.render_browser(
+                    active_browser_surface.expect("browser surface is present when rendered"),
+                    cx,
+                ))
             })
             .when(show_apps, |content| {
                 content.child(self.render_apps(
@@ -1779,7 +1856,7 @@ impl Render for IdeallDesktop {
             .when(show_settings, |content| {
                 content.child(self.render_settings(available_update, cx))
             })
-            .when(has_selection, |content| {
+            .when(has_selection && !show_browser_surface, |content| {
                 content.child(self.render_editor(window, cx))
             });
 
@@ -1793,7 +1870,13 @@ impl Render for IdeallDesktop {
             .on_action(cx.listener(Self::activate_next_tab))
             .on_action(cx.listener(Self::activate_previous_tab))
             .on_action(cx.listener(Self::toggle_project_panel_from_shortcut))
+            .on_action(cx.listener(Self::select_recent_section_from_shortcut))
+            .on_action(cx.listener(Self::select_browser_section_from_shortcut))
+            .on_action(cx.listener(Self::select_apps_section_from_shortcut))
+            .on_action(cx.listener(Self::select_settings_section_from_shortcut))
             .on_action(cx.listener(Self::create_text_file_from_shortcut))
+            .on_action(cx.listener(Self::create_folder_from_tree))
+            .on_action(cx.listener(Self::import_files_from_tree))
             .on_action(cx.listener(Self::find_in_editor))
             .on_action(cx.listener(Self::replace_in_editor))
             .on_action(cx.listener(Self::open_selected_node))
@@ -1819,8 +1902,10 @@ impl Render for IdeallDesktop {
                     .flex_1()
                     .min_h_0()
                     .flex()
-                    .gap_2()
-                    .p_2()
+                    .gap(px(8.0))
+                    .px(px(8.0))
+                    .pt(px(7.0))
+                    .pb(px(7.0))
                     .child(self.render_activity_bar(cx))
                     .child(
                         div().flex_1().min_w_0().h_full().child(
@@ -1839,30 +1924,33 @@ impl Render for IdeallDesktop {
             )
             .child(
                 div()
-                    .h(px(26.0))
+                    .h(px(22.0))
                     .flex()
                     .items_center()
-                    .gap_3()
-                    .px_3()
-                    .border_t_1()
-                    .border_color(rgb(BORDER))
+                    .gap_2()
+                    .px(px(12.0))
                     .bg(rgb(CANVAS))
                     .text_xs()
                     .text_color(rgb(INK_MUTED))
-                    .child(
-                        div()
-                            .w(px(40.0))
-                            .text_center()
-                            .text_color(rgb(ACCENT))
-                            .child("⌁"),
-                    )
-                    .child("ideall://local")
+                    .child(div().w(px(6.0)).h(px(6.0)).rounded_full().bg(rgb(ACCENT)))
+                    .child(workspace_status)
                     .child(div().flex_1())
-                    .child(format!("{} 个项目", self.explorer.items.len()))
-                    .child("SQLite")
+                    .child(format!("{} 项", self.explorer.items.len()))
                     .child(format!("v{}", env!("CARGO_PKG_VERSION"))),
             )
     }
+}
+
+fn activity_action_content(icon: &'static str, label: &'static str) -> gpui::Div {
+    div()
+        .size_full()
+        .flex()
+        .items_center()
+        .gap_2()
+        .px_2()
+        .text_sm()
+        .child(div().w(px(18.0)).text_center().child(icon))
+        .child(label)
 }
 
 fn welcome_action(
@@ -1873,21 +1961,21 @@ fn welcome_action(
 ) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
-        .h(px(64.0))
+        .h(px(54.0))
         .flex()
         .items_center()
         .gap_3()
-        .px_4()
+        .px_3()
         .rounded_md()
         .border_1()
         .border_color(rgb(BORDER))
-        .bg(rgb(SURFACE_MUTED))
+        .bg(rgb(SURFACE))
         .cursor_pointer()
         .hover(|item| item.bg(rgb(HOVER)).border_color(rgb(BORDER_STRONG)))
         .child(
             div()
-                .w(px(28.0))
-                .h(px(28.0))
+                .w(px(26.0))
+                .h(px(26.0))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -1909,8 +1997,8 @@ fn settings_card(title: &'static str) -> gpui::Div {
         .rounded_lg()
         .border_1()
         .border_color(rgb(BORDER))
-        .bg(rgb(SURFACE_MUTED))
-        .child(div().text_lg().child(title))
+        .bg(rgb(SURFACE))
+        .child(div().text_sm().text_color(rgb(INK)).child(title))
 }
 
 fn page_heading(title: &'static str, subtitle: &'static str) -> gpui::Div {
@@ -1919,7 +2007,7 @@ fn page_heading(title: &'static str, subtitle: &'static str) -> gpui::Div {
         .flex_col()
         .gap_1()
         .pb_2()
-        .child(div().text_2xl().child(title))
+        .child(div().text_xl().child(title))
         .child(div().text_sm().text_color(rgb(INK_MUTED)).child(subtitle))
 }
 

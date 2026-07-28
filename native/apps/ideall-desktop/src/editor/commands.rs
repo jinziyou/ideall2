@@ -3,9 +3,9 @@ use std::ops::Range;
 use gpui::{EntityInputHandler as _, Focusable as _};
 use ideall_application::{
     NoteBlockIndent, NoteBlockMove, NoteBlockStyle, NoteEditError, NoteInlineStyle,
-    apply_note_block_style, apply_note_slash_command, delete_note_block, duplicate_note_block,
-    indent_note_block, move_note_block, note_slash_commands, note_slash_query,
-    toggle_note_inline_style, toggle_note_todo,
+    apply_note_block_style, apply_note_slash_command, duplicate_note_block, indent_note_block,
+    move_note_block, note_slash_commands, note_slash_query, toggle_note_inline_style,
+    toggle_note_todo,
 };
 
 use super::*;
@@ -140,20 +140,6 @@ impl IdeallDesktop {
             cx,
             duplicate_note_block,
             "已复制当前块",
-            "当前块未发生变化",
-        );
-    }
-
-    pub(crate) fn delete_current_note_block(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.transform_current_note_block(
-            window,
-            cx,
-            delete_note_block,
-            "已删除当前块，可使用撤销恢复",
             "当前块未发生变化",
         );
     }

@@ -21,6 +21,9 @@ impl IdeallDesktop {
         } else {
             self.browser.current_url = Some(url.clone());
         }
+        self.browser
+            .address_input
+            .update(cx, |input, cx| input.set_value(url.clone(), window, cx));
         self.browser.webview = None;
         match create_embedded_browser(&url, window, cx) {
             Ok(webview) => {
@@ -33,6 +36,38 @@ impl IdeallDesktop {
                 self.status = Some(format!("{error}；已交给系统浏览器").into());
             }
         }
+        cx.notify();
+    }
+
+    pub(crate) fn navigate_browser_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(url) = self.browser.go_back() else {
+            return;
+        };
+        self.navigate_browser_to(&url, false, window, cx);
+    }
+
+    pub(crate) fn navigate_browser_forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(url) = self.browser.go_forward() else {
+            return;
+        };
+        self.navigate_browser_to(&url, false, window, cx);
+    }
+
+    pub(crate) fn reload_browser(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(url) = self.browser.current_url().map(str::to_owned) else {
+            return;
+        };
+        self.navigate_browser_to(&url, false, window, cx);
+    }
+
+    pub(crate) fn open_current_browser_external(&mut self, cx: &mut Context<Self>) {
+        let Some(url) = self.browser.current_url().map(str::to_owned) else {
+            self.status = Some("当前没有可打开的网页地址".into());
+            cx.notify();
+            return;
+        };
+        cx.open_url(&url);
+        self.status = Some("已交给系统浏览器打开".into());
         cx.notify();
     }
 }

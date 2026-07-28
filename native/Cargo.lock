@@ -4271,6 +4271,7 @@ dependencies = [
  "lb-wry",
  "shell-words",
  "url",
+ "x11rb",
 ]
 
 [[package]]

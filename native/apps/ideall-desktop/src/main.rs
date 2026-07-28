@@ -1,25 +1,26 @@
 mod actions;
+mod assets;
 mod browser;
 mod editor;
 mod explorer;
 mod shell;
 mod view;
+mod windowing;
 
 use std::{path::PathBuf, time::Duration};
 
 use directories::ProjectDirs;
 use gpui::{
     App, Application, Context, Entity, IntoElement, MouseButton, PathPromptOptions, PromptButton,
-    PromptLevel, Render, SharedString, Subscription, Task, TitlebarOptions, Window, WindowBounds,
-    WindowOptions, div, prelude::*, px, rgb, size,
+    PromptLevel, Render, SharedString, Subscription, Task, Window, div, prelude::*, px, rgb, size,
 };
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use gpui_component::webview::WebView;
 use gpui_component::{
-    Disableable as _, PixelsExt as _, Root, Selectable as _, Sizable as _,
+    Disableable as _, Icon, IconName, PixelsExt as _, Root, Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputEvent, InputState},
-    menu::ContextMenuExt as _,
+    menu::{ContextMenuExt as _, DropdownMenu as _},
     resizable::{ResizablePanelEvent, ResizableState, h_resizable, resizable_panel},
     scroll::ScrollableElement as _,
     text::TextView,
@@ -38,13 +39,13 @@ use ideall_domain::{
     resolve_default_engine, tab_key,
 };
 use ideall_presentation::{
-    LatestRequest, NAVIGATION,
+    LatestRequest, NAVIGATION, NavigationItem,
     color::desktop::{
-        ACCENT, ACCENT_SOFT, BORDER, BORDER_STRONG, CANVAS, DANGER, DANGER_BORDER, EDITOR,
-        EDITOR_GUTTER, HOVER, INK, INK_FAINT, INK_MUTED, MESSAGE_TOOL, RAIL_ACTIVE, RAIL_INK,
-        RAIL_MUTED, SELECTION, SURFACE, SURFACE_MUTED, SURFACE_RAISED, WARNING_SOFT,
+        ACCENT, ACCENT_ACTIVE, ACCENT_HOVER, ACCENT_ON_RAIL, ACCENT_SOFT, BORDER, BORDER_STRONG,
+        CANVAS, DANGER, DANGER_BORDER, EDITOR, EDITOR_GUTTER, HOVER, INK, INK_FAINT, INK_MUTED,
+        MESSAGE_TOOL, RAIL, RAIL_ACTIVE, RAIL_MUTED, SELECTION, SURFACE, SURFACE_MUTED,
+        SURFACE_RAISED, WARNING_SOFT,
     },
-    section_description, section_eyebrow,
 };
 use ideall_protocol::{EngineAccess, EngineDescriptor, FileRef, Node, NodeKind, SubscriptionType};
 use ideall_secrets::{SecretKey, SecretStore as _, SystemSecretStore};
@@ -52,13 +53,15 @@ use ideall_sync::{is_valid_sync_code, normalize_sync_code};
 use ideall_sync_http::HttpSyncTransport;
 use ideall_updater::{AvailableUpdate, UpdateStatus, updater_from_environment};
 
-use browser::BrowserWorkspace;
+use assets::IdeallAssets;
+use browser::{BrowserWorkspace, browser_surface};
 use editor::{
     EditorInputs, EditorMode, EditorWorkspace, LoadedDocument, code_language_for_node, engine_icon,
     kind_color_for_engine, position_for_byte_offset,
 };
 use explorer::{DraggedNode, ExplorerState, kind_color, kind_icon};
 use shell::ShellWorkspace;
+use windowing::desktop_window_options;
 
 const INFO_PORTAL_URL: &str = "https://www.wonita.link/info";
 const COMMUNITY_PORTAL_URL: &str = "https://www.wonita.link/community";
@@ -169,6 +172,8 @@ impl IdeallDesktop {
             cx.new(|cx| InputState::new(window, cx).placeholder("搜索标题与正文（Ctrl/⌘ K）"));
         let feed_key_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("发布者域名，例如 example.com"));
+        let browser_address_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("输入 HTTP(S) 地址并按 Enter"));
         let title_input = cx.new(|cx| InputState::new(window, cx).placeholder("标题"));
         let body_input = cx.new(|cx| {
             InputState::new(window, cx)
@@ -296,6 +301,16 @@ impl IdeallDesktop {
                 cx.notify();
             }
         });
+        let browser_address_subscription = cx.subscribe_in(
+            &browser_address_input,
+            window,
+            |this, input, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    let url = input.read(cx).value().to_string();
+                    this.navigate_browser_to(&url, true, window, cx);
+                }
+            },
+        );
         let body_observer = cx.observe(&body_input, |_, _, cx| cx.notify());
         let code_observer = cx.observe(&code_input, |_, _, cx| cx.notify());
         let search_subscription =
@@ -340,7 +355,7 @@ impl IdeallDesktop {
         );
         let explorer =
             ExplorerState::new(items, explorer_layout, rename_input, explorer_resize_state);
-        let browser = BrowserWorkspace::new();
+        let browser = BrowserWorkspace::new(browser_address_input);
         let shell = ShellWorkspace::new(window, cx);
         let shell_subscription = shell.subscribe(window, cx);
         let window_activation =
@@ -391,6 +406,7 @@ impl IdeallDesktop {
                 code_subscription,
                 find_subscription,
                 replace_subscription,
+                browser_address_subscription,
                 body_observer,
                 code_observer,
                 search_subscription,
@@ -760,7 +776,7 @@ impl IdeallDesktop {
         cx: &mut Context<Self>,
     ) {
         self.editor.active_engine_id = Some(engine_id.to_owned());
-        self.browser.clear();
+        self.browser.clear(window, cx);
         if engine_id != "ideall.browser" {
             return;
         }
@@ -1040,40 +1056,6 @@ impl IdeallDesktop {
                 cx.open_with_system(&target);
                 self.status = Some(format!("已导出 {size} 字节临时副本并交给系统应用").into());
             }
-            Err(error) => self.status = Some(error.to_string().into()),
-        }
-        cx.notify();
-    }
-
-    fn move_selected_to_trash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.editor.dirty {
-            self.save(window, cx);
-            if self.editor.dirty {
-                return;
-            }
-        }
-        let Some(id) = self.editor.selected_id.clone() else {
-            return;
-        };
-        match self.service.move_to_trash(&id) {
-            Ok(true) => {
-                let tab_ids = self
-                    .editor
-                    .workspace
-                    .tabs
-                    .iter()
-                    .filter(|tab| tab.file.file_id == id)
-                    .map(tab_key)
-                    .collect::<Vec<_>>();
-                for tab_id in tab_ids {
-                    self.editor.workspace.close(&tab_id);
-                }
-                self.persist_workspace();
-                self.clear_selection(window, cx);
-                self.refresh_items();
-                self.status = Some("已移到回收站".into());
-            }
-            Ok(false) => self.status = Some("项目已不在当前列表".into()),
             Err(error) => self.status = Some(error.to_string().into()),
         }
         cx.notify();
@@ -1855,7 +1837,7 @@ impl IdeallDesktop {
     fn clear_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.detach_pending_autosave(cx);
         self.editor.clear(window, cx);
-        self.browser.clear();
+        self.browser.clear(window, cx);
     }
 
     fn toggle_folder(&mut self, id: String, cx: &mut Context<Self>) {
@@ -1867,6 +1849,16 @@ impl IdeallDesktop {
     fn show_editor_find(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
         if !self.editor.has_selection() {
             self.status = Some("请先打开一个文件或笔记".into());
+            cx.notify();
+            return;
+        }
+        if browser_surface(
+            self.editor.active_engine_id.as_deref(),
+            self.editor.selected_kind,
+        )
+        .is_some()
+        {
+            self.status = Some("浏览器查找与文档查找相互独立".into());
             cx.notify();
             return;
         }
@@ -1947,18 +1939,6 @@ impl IdeallDesktop {
         self.editor.find_cursor = 0;
         self.mark_editor_dirty(cx);
         self.status = Some(format!("已替换 {count} 处，等待自动保存").into());
-        cx.notify();
-    }
-
-    fn expand_all_folders(&mut self, cx: &mut Context<Self>) {
-        self.explorer.expand_all();
-        self.persist_workspace();
-        cx.notify();
-    }
-
-    fn collapse_all_folders(&mut self, cx: &mut Context<Self>) {
-        self.explorer.collapse_all();
-        self.persist_workspace();
         cx.notify();
     }
 
@@ -2257,54 +2237,65 @@ fn select_linux_backend() {
 #[cfg(not(target_os = "linux"))]
 fn select_linux_backend() {}
 
-fn desktop_window_options(cx: &App) -> WindowOptions {
-    WindowOptions {
-        window_bounds: Some(WindowBounds::centered(size(px(1280.0), px(820.0)), cx)),
-        titlebar: Some(TitlebarOptions {
-            title: Some("ideall · 本地信息终端".into()),
-            ..Default::default()
-        }),
-        window_min_size: Some(size(px(920.0), px(600.0))),
-        app_id: Some("com.jinziyou.ideall".into()),
-        ..Default::default()
-    }
-}
-
 fn main() {
     select_linux_backend();
     let secure_store_error = ideall_secrets::initialize_platform()
         .err()
         .map(|error| format!("无法初始化系统安全存储：{error}"));
-    Application::new().run(move |cx: &mut App| {
-        gpui_component::init(cx);
-        Theme::change(ThemeMode::Light, None, cx);
-        actions::init(cx);
-        let initialized = (|| {
-            if let Some(error) = secure_store_error {
-                return Err(error);
+    Application::new()
+        .with_assets(IdeallAssets)
+        .run(move |cx: &mut App| {
+            gpui_component::init(cx);
+            Theme::change(ThemeMode::Light, None, cx);
+            configure_desktop_theme(cx);
+            actions::init(cx);
+            let initialized = (|| {
+                if let Some(error) = secure_store_error {
+                    return Err(error);
+                }
+                let database_path = native_database_path()?;
+                let service = LocalWorkspace::open(&database_path)
+                    .map_err(|error| format!("无法打开本地数据库：{error}"))?;
+                Ok::<_, String>((database_path, service))
+            })();
+            let window_result = match initialized {
+                Ok((database_path, service)) => cx
+                    .open_window(desktop_window_options(cx), |window, cx| {
+                        let workspace =
+                            cx.new(|cx| IdeallDesktop::new(database_path, service, window, cx));
+                        cx.new(|cx| Root::new(workspace, window, cx))
+                    })
+                    .map(|_| ()),
+                Err(message) => cx
+                    .open_window(desktop_window_options(cx), |_window, cx| {
+                        cx.new(|_| DesktopStartupFailure { message })
+                    })
+                    .map(|_| ()),
+            };
+            if let Err(error) = window_result {
+                eprintln!("failed to open ideall desktop window: {error}");
             }
-            let database_path = native_database_path()?;
-            let service = LocalWorkspace::open(&database_path)
-                .map_err(|error| format!("无法打开本地数据库：{error}"))?;
-            Ok::<_, String>((database_path, service))
-        })();
-        let window_result = match initialized {
-            Ok((database_path, service)) => cx
-                .open_window(desktop_window_options(cx), |window, cx| {
-                    let workspace =
-                        cx.new(|cx| IdeallDesktop::new(database_path, service, window, cx));
-                    cx.new(|cx| Root::new(workspace, window, cx))
-                })
-                .map(|_| ()),
-            Err(message) => cx
-                .open_window(desktop_window_options(cx), |_window, cx| {
-                    cx.new(|_| DesktopStartupFailure { message })
-                })
-                .map(|_| ()),
-        };
-        if let Err(error) = window_result {
-            eprintln!("failed to open ideall desktop window: {error}");
-        }
-        cx.activate(true);
-    });
+            cx.activate(true);
+        });
+}
+
+fn configure_desktop_theme(cx: &mut App) {
+    let theme = Theme::global_mut(cx);
+    theme.primary = rgb(ACCENT).into();
+    theme.primary_hover = rgb(ACCENT_HOVER).into();
+    theme.primary_active = rgb(ACCENT_ACTIVE).into();
+    theme.primary_foreground = rgb(SURFACE).into();
+    theme.ring = rgb(ACCENT).into();
+    theme.selection = rgb(SELECTION).into();
+    theme.accent = rgb(ACCENT_SOFT).into();
+    theme.accent_foreground = rgb(INK).into();
+    theme.muted = rgb(SURFACE_MUTED).into();
+    theme.muted_foreground = rgb(INK_MUTED).into();
+    theme.secondary = rgb(SURFACE_MUTED).into();
+    theme.secondary_foreground = rgb(INK).into();
+    theme.border = rgb(BORDER).into();
+    theme.input = rgb(BORDER_STRONG).into();
+    theme.radius = px(7.0);
+    theme.radius_lg = px(10.0);
+    theme.shadow = false;
 }

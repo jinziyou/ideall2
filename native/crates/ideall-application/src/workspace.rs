@@ -292,9 +292,11 @@ impl LocalWorkspace {
                 "application/vnd.ideall.bookmark+json".into(),
                 None,
             ),
-            Node::File { blob_ref, .. } => {
-                (FileKind::File, blob_ref.mime.clone(), Some(blob_ref.size))
-            }
+            Node::File { blob_ref, .. } => (
+                FileKind::File,
+                effective_file_media_type(&base.title, &blob_ref.mime),
+                Some(blob_ref.size),
+            ),
             Node::Feed { .. } => (
                 FileKind::File,
                 "application/vnd.ideall.feed+json".into(),
@@ -685,7 +687,8 @@ impl LocalWorkspace {
                 expected: NodeKind::File,
             });
         };
-        if !is_text_media_type(&blob_ref.mime) {
+        let media_type = effective_file_media_type(&base.title, &blob_ref.mime);
+        if !is_text_media_type(&media_type) {
             return Err(ApplicationError::BinaryFileReadOnly(id.into()));
         }
         let (_, data) =
@@ -697,10 +700,7 @@ impl LocalWorkspace {
                 })?;
         let text = String::from_utf8(data)
             .map_err(|_| ApplicationError::InvalidTextEncoding(id.into()))?;
-        Ok(TextFileDocument {
-            text,
-            media_type: blob_ref.mime,
-        })
+        Ok(TextFileDocument { text, media_type })
     }
 
     pub fn update_text_file(&mut self, id: &str, text: &str) -> Result<Node, ApplicationError> {
@@ -778,7 +778,9 @@ impl LocalWorkspace {
         let Some(value) = self.database.workspace_state()? else {
             return Ok(WorkspaceState::default());
         };
-        Ok(serde_json::from_value(value).unwrap_or_default())
+        let mut workspace: WorkspaceState = serde_json::from_value(value).unwrap_or_default();
+        workspace.migrate_retired_engines();
+        Ok(workspace)
     }
 
     pub fn save_workspace_state(
@@ -790,10 +792,12 @@ impl LocalWorkspace {
     }
 
     pub fn load_engine_preferences(&self) -> Result<EnginePreferences, ApplicationError> {
-        Ok(self
+        let mut preferences: EnginePreferences = self
             .database
             .setting(ENGINE_PREFERENCES_KEY)?
-            .unwrap_or_default())
+            .unwrap_or_default();
+        preferences.migrate_retired_engines();
+        Ok(preferences)
     }
 
     pub fn save_engine_preferences(
@@ -2041,13 +2045,21 @@ fn media_type_for_path(path: &Path) -> &'static str {
         .map(str::to_ascii_lowercase)
         .as_deref()
     {
-        Some("md" | "markdown") => "text/markdown",
-        Some("txt" | "log") => "text/plain",
-        Some("json") => "application/json",
-        Some("js" | "mjs" | "cjs") => "application/javascript",
-        Some("ts" | "tsx") => "application/typescript",
+        Some("md" | "mdx" | "markdown") => "text/markdown",
+        Some(
+            "txt" | "log" | "csv" | "ini" | "conf" | "config" | "env" | "properties" | "rs" | "go"
+            | "py" | "rb" | "java" | "c" | "h" | "cc" | "cpp" | "cxx" | "hpp" | "cs" | "swift"
+            | "zig" | "sh" | "bash" | "zsh" | "fish" | "sql" | "graphql" | "gql" | "proto"
+            | "cmake" | "make" | "diff" | "patch" | "kt" | "kts" | "dart" | "lua" | "r" | "php"
+            | "vue" | "svelte" | "astro",
+        ) => "text/plain",
+        Some("json" | "jsonc") => "application/json",
+        Some("js" | "jsx" | "mjs" | "cjs") => "application/javascript",
+        Some("ts" | "tsx" | "mts" | "cts") => "application/typescript",
+        Some("toml") => "application/toml",
+        Some("yaml" | "yml") => "application/yaml",
         Some("html" | "htm") => "text/html",
-        Some("css") => "text/css",
+        Some("css" | "scss") => "text/css",
         Some("xml") => "application/xml",
         Some("svg") => "image/svg+xml",
         Some("png") => "image/png",
@@ -2058,9 +2070,18 @@ fn media_type_for_path(path: &Path) -> &'static str {
         Some("mp3") => "audio/mpeg",
         Some("wav") => "audio/wav",
         Some("mp4") => "video/mp4",
-        Some("sqlite" | "sqlite3" | "db") => "application/x-sqlite3",
         _ => "application/octet-stream",
     }
+}
+
+fn effective_file_media_type(name: &str, stored_media_type: &str) -> String {
+    if stored_media_type == "application/octet-stream" {
+        let inferred = media_type_for_path(Path::new(name));
+        if is_text_media_type(inferred) {
+            return inferred.into();
+        }
+    }
+    stored_media_type.into()
 }
 
 fn is_text_media_type(media_type: &str) -> bool {
@@ -2862,7 +2883,7 @@ mod tests {
         let mut preferences = EnginePreferences::default();
         preferences
             .media_types
-            .insert("text/plain".into(), "ideall.code".into());
+            .insert("text/plain".into(), "ideall.text".into());
         workspace.save_engine_preferences(&preferences).unwrap();
         assert_eq!(workspace.load_engine_preferences().unwrap(), preferences);
         assert_eq!(
@@ -3339,6 +3360,74 @@ mod tests {
             panic!("expected imported file");
         };
         assert_eq!(blob_ref.mime, "text/markdown");
+    }
+
+    #[test]
+    fn source_files_are_imported_as_text_while_database_files_stay_binary() {
+        let directory = tempfile::tempdir().unwrap();
+        let source_path = directory.path().join("main.rs");
+        let database_path = directory.path().join("archive.db");
+        std::fs::write(&source_path, b"fn main() {}").unwrap();
+        std::fs::write(&database_path, b"SQLite format 3\0").unwrap();
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+
+        let source = workspace
+            .import_file(None, &source_path, 1024)
+            .expect("source file should import");
+        let database = workspace
+            .import_file(None, &database_path, 1024)
+            .expect("database file should import");
+
+        let Node::File {
+            blob_ref: source_blob,
+            ..
+        } = source
+        else {
+            panic!("expected source file");
+        };
+        let Node::File {
+            blob_ref: database_blob,
+            ..
+        } = database
+        else {
+            panic!("expected database file");
+        };
+        assert_eq!(source_blob.mime, "text/plain");
+        assert_eq!(database_blob.mime, "application/octet-stream");
+    }
+
+    #[test]
+    fn legacy_binary_mime_uses_the_file_suffix_only_for_text_formats() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        let source = workspace
+            .create_file(
+                None,
+                "legacy.rs",
+                "application/octet-stream",
+                b"fn main() {}".to_vec(),
+            )
+            .unwrap();
+        let database = workspace
+            .create_file(
+                None,
+                "legacy.db",
+                "application/octet-stream",
+                b"SQLite format 3\0".to_vec(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            workspace
+                .file_metadata(&source.base().id)
+                .unwrap()
+                .media_type,
+            "text/plain"
+        );
+        assert_eq!(
+            workspace.text_file(&source.base().id).unwrap().text,
+            "fn main() {}"
+        );
+        assert!(workspace.text_file(&database.base().id).is_err());
     }
 
     #[test]

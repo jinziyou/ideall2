@@ -21,7 +21,7 @@ pub(super) struct EditorWorkspace {
     pub(super) selected_kind: Option<NodeKind>,
     pub(super) title_input: Entity<InputState>,
     pub(super) body_input: Entity<InputState>,
-    pub(super) code_input: Entity<InputState>,
+    pub(super) text_input: Entity<InputState>,
     pub(super) find_input: Entity<InputState>,
     pub(super) replace_input: Entity<InputState>,
     pub(super) find_visible: bool,
@@ -56,7 +56,7 @@ pub(super) struct LoadedDocument {
 pub(super) struct EditorInputs {
     pub(super) title: Entity<InputState>,
     pub(super) body: Entity<InputState>,
-    pub(super) code: Entity<InputState>,
+    pub(super) text: Entity<InputState>,
     pub(super) find: Entity<InputState>,
     pub(super) replace: Entity<InputState>,
 }
@@ -81,7 +81,7 @@ impl EditorWorkspace {
             selected_kind: None,
             title_input: inputs.title,
             body_input: inputs.body,
-            code_input: inputs.code,
+            text_input: inputs.text,
             find_input: inputs.find,
             replace_input: inputs.replace,
             find_visible: false,
@@ -105,8 +105,8 @@ impl EditorWorkspace {
     pub(super) fn draft(&self, cx: &Context<IdeallDesktop>) -> Option<EditorDraft> {
         let id = self.selected_id.clone()?;
         let title = self.title_input.read(cx).value().to_string();
-        let body = if self.active_engine_id.as_deref() == Some("ideall.code") {
-            self.code_input.read(cx).value().to_string()
+        let body = if self.active_engine_id.as_deref() == Some("ideall.text") {
+            self.text_input.read(cx).value().to_string()
         } else {
             self.body_input.read(cx).value().to_string()
         };
@@ -135,7 +135,7 @@ impl EditorWorkspace {
         self.body_input.update(cx, |input, cx| {
             input.set_value(document.body.clone(), window, cx)
         });
-        self.code_input.update(cx, |input, cx| {
+        self.text_input.update(cx, |input, cx| {
             input.set_highlighter(document.language, cx);
             input.set_value(document.body, window, cx);
         });
@@ -157,7 +157,7 @@ impl EditorWorkspace {
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.body_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.code_input
+        self.text_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.suppress_events = false;
         self.active_engine_id = None;
@@ -201,8 +201,8 @@ impl EditorWorkspace {
     }
 
     pub(super) fn active_input(&self) -> &Entity<InputState> {
-        if self.active_engine_id.as_deref() == Some("ideall.code") {
-            &self.code_input
+        if self.active_engine_id.as_deref() == Some("ideall.text") {
+            &self.text_input
         } else {
             &self.body_input
         }
@@ -221,34 +221,44 @@ impl EditorWorkspace {
     }
 }
 
-pub(super) fn code_language_for_node(service: &LocalWorkspace, id: &str) -> &'static str {
+pub(super) fn text_highlight_for_node(service: &LocalWorkspace, id: &str) -> &'static str {
     let Ok(file) = service.file_metadata(id) else {
-        return "markdown";
+        return "text";
     };
-    code_language(&file.media_type, &file.name)
+    text_highlight_language(&file.media_type, &file.name)
 }
 
-fn code_language(media_type: &str, name: &str) -> &'static str {
+fn text_highlight_language(media_type: &str, name: &str) -> &'static str {
     let extension = name
         .rsplit_once('.')
         .map(|(_, extension)| extension.to_ascii_lowercase());
     match (media_type, extension.as_deref()) {
         (_, Some("rs")) => "rust",
-        (_, Some("ts" | "tsx")) => "typescript",
+        (_, Some("ts")) => "typescript",
+        (_, Some("tsx")) => "tsx",
         (_, Some("js" | "jsx" | "mjs" | "cjs")) => "javascript",
-        ("application/json", _) | (_, Some("json")) => "json",
+        ("application/json", _) | (_, Some("json" | "jsonc")) => "json",
         ("text/markdown", _) | (_, Some("md" | "mdx")) => "markdown",
         (_, Some("toml")) => "toml",
         (_, Some("yaml" | "yml")) => "yaml",
         ("text/html", _) | (_, Some("html" | "htm")) => "html",
-        ("text/css", _) | (_, Some("css")) => "css",
+        ("text/css", _) | (_, Some("css" | "scss")) => "css",
         (_, Some("py")) => "python",
         (_, Some("go")) => "go",
         (_, Some("c" | "h")) => "c",
         (_, Some("cc" | "cpp" | "cxx" | "hpp")) => "cpp",
-        (_, Some("sh" | "bash")) => "bash",
-        (_, Some("sql")) => "sql",
-        _ => "markdown",
+        (_, Some("sh" | "bash" | "zsh" | "fish")) => "bash",
+        (_, Some("java")) => "java",
+        (_, Some("cs")) => "csharp",
+        (_, Some("rb")) => "ruby",
+        (_, Some("swift")) => "swift",
+        (_, Some("zig")) => "zig",
+        (_, Some("proto")) => "proto",
+        (_, Some("graphql" | "gql")) => "graphql",
+        (_, Some("cmake")) => "cmake",
+        (_, Some("diff" | "patch")) => "diff",
+        _ if name.eq_ignore_ascii_case("makefile") => "make",
+        _ => "text",
     }
 }
 
@@ -350,12 +360,15 @@ mod tests {
     }
 
     #[test]
-    fn code_language_prefers_known_extensions_and_falls_back_to_media_type() {
-        assert_eq!(code_language("text/plain", "main.rs"), "rust");
-        assert_eq!(code_language("application/json", "settings"), "json");
+    fn text_highlight_prefers_known_extensions_and_falls_back_to_plain_text() {
+        assert_eq!(text_highlight_language("text/plain", "main.rs"), "rust");
         assert_eq!(
-            code_language("application/octet-stream", "unknown"),
-            "markdown"
+            text_highlight_language("application/json", "settings"),
+            "json"
+        );
+        assert_eq!(
+            text_highlight_language("application/octet-stream", "unknown"),
+            "text"
         );
     }
 }

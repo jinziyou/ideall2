@@ -5,14 +5,14 @@ use gpui_component::{Sizable as _, button::ButtonVariants as _, scroll::Scrollab
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum EditorMode {
     Plain,
-    Code,
+    Text,
     Preview,
 }
 
 impl EditorWorkspace {
     pub(crate) fn mode(&self) -> EditorMode {
         match self.active_engine_id.as_deref() {
-            Some("ideall.code") if self.selected_kind == Some(NodeKind::File) => EditorMode::Code,
+            Some("ideall.text") if self.selected_kind == Some(NodeKind::File) => EditorMode::Text,
             Some("ideall.preview") if self.selected_kind == Some(NodeKind::File) => {
                 EditorMode::Preview
             }
@@ -234,7 +234,7 @@ impl IdeallDesktop {
 
 pub(crate) fn engine_icon(engine_id: &str) -> &'static str {
     match engine_id {
-        "ideall.code" => "<>",
+        "ideall.text" => "T",
         "ideall.preview" => "◫",
         "ideall.browser" => "↗",
         "ideall.note" => "N",
@@ -245,7 +245,7 @@ pub(crate) fn engine_icon(engine_id: &str) -> &'static str {
 
 pub(crate) fn kind_color_for_engine(engine_id: &str) -> u32 {
     match engine_id {
-        "ideall.code" => 0x9b8afb,
+        "ideall.text" => 0x64748b,
         "ideall.preview" => 0x3574f0,
         "ideall.browser" => 0x478c6c,
         "ideall.directory" => 0xb47b18,

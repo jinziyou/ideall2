@@ -1,11 +1,9 @@
-mod actions;
 mod assets;
 mod browser;
 mod editor;
 mod explorer;
-mod shell;
-mod view;
 mod windowing;
+mod workbench;
 
 use std::{path::PathBuf, time::Duration};
 
@@ -56,11 +54,10 @@ use ideall_updater::{AvailableUpdate, UpdateStatus, updater_from_environment};
 use assets::IdeallAssets;
 use browser::{BrowserWorkspace, browser_surface};
 use editor::{
-    EditorInputs, EditorMode, EditorWorkspace, LoadedDocument, code_language_for_node, engine_icon,
-    kind_color_for_engine, position_for_byte_offset,
+    EditorInputs, EditorMode, EditorWorkspace, LoadedDocument, engine_icon, kind_color_for_engine,
+    position_for_byte_offset, text_highlight_for_node,
 };
 use explorer::{DraggedNode, ExplorerState, kind_color, kind_icon};
-use shell::ShellWorkspace;
 use windowing::desktop_window_options;
 
 const INFO_PORTAL_URL: &str = "https://www.wonita.link/info";
@@ -125,7 +122,6 @@ struct IdeallDesktop {
     editor: EditorWorkspace,
     explorer: ExplorerState,
     browser: BrowserWorkspace,
-    shell: ShellWorkspace,
     active_section: SharedString,
     show_trash: bool,
     search_query: String,
@@ -182,9 +178,10 @@ impl IdeallDesktop {
                 .searchable(true)
                 .placeholder("从这里开始记录；输入 / 插入内容块……")
         });
-        let code_input = cx.new(|cx| {
+        let text_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .code_editor("markdown")
+                .code_editor("text")
+                .line_number(false)
                 .searchable(true)
                 .placeholder("文件内容")
         });
@@ -277,7 +274,7 @@ impl IdeallDesktop {
                 _ => {}
             },
         );
-        let code_subscription = cx.subscribe(&code_input, |this, _, event: &InputEvent, cx| {
+        let text_subscription = cx.subscribe(&text_input, |this, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
                 this.mark_editor_dirty(cx);
             }
@@ -312,7 +309,7 @@ impl IdeallDesktop {
             },
         );
         let body_observer = cx.observe(&body_input, |_, _, cx| cx.notify());
-        let code_observer = cx.observe(&code_input, |_, _, cx| cx.notify());
+        let text_observer = cx.observe(&text_input, |_, _, cx| cx.notify());
         let search_subscription =
             cx.subscribe(&search_input, |this, input, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) && !this.suppress_search_events {
@@ -348,7 +345,7 @@ impl IdeallDesktop {
             EditorInputs {
                 title: title_input,
                 body: body_input,
-                code: code_input,
+                text: text_input,
                 find: find_input,
                 replace: replace_input,
             },
@@ -356,8 +353,6 @@ impl IdeallDesktop {
         let explorer =
             ExplorerState::new(items, explorer_layout, rename_input, explorer_resize_state);
         let browser = BrowserWorkspace::new(browser_address_input);
-        let shell = ShellWorkspace::new(window, cx);
-        let shell_subscription = shell.subscribe(window, cx);
         let window_activation =
             cx.observe_window_activation(window, Self::window_activation_changed);
         let mut this = Self {
@@ -367,7 +362,6 @@ impl IdeallDesktop {
             editor,
             explorer,
             browser,
-            shell,
             active_section: "我的".into(),
             show_trash: false,
             search_query: String::new(),
@@ -403,16 +397,15 @@ impl IdeallDesktop {
             _subscriptions: vec![
                 title_subscription,
                 body_subscription,
-                code_subscription,
+                text_subscription,
                 find_subscription,
                 replace_subscription,
                 browser_address_subscription,
                 body_observer,
-                code_observer,
+                text_observer,
                 search_subscription,
                 rename_subscription,
                 explorer_resize_subscription,
-                shell_subscription,
                 window_activation,
             ],
         };
@@ -693,7 +686,7 @@ impl IdeallDesktop {
                 let kind = node.kind();
                 let title = node.base().title.clone();
                 let (body, editable, protected_blocks) = self.node_body(&node);
-                let language = code_language_for_node(&self.service, id);
+                let language = text_highlight_for_node(&self.service, id);
                 self.editor.load_document(
                     LoadedDocument {
                         id: id.to_owned(),
@@ -902,9 +895,9 @@ impl IdeallDesktop {
                                 }
                             }
                             if this.editor.selected_kind == Some(NodeKind::File) {
-                                let language = code_language_for_node(&this.service, &id);
+                                let language = text_highlight_for_node(&this.service, &id);
                                 this.editor
-                                    .code_input
+                                    .text_input
                                     .update(cx, |input, cx| input.set_highlighter(language, cx));
                             }
                             this.persist_workspace();
@@ -1585,13 +1578,13 @@ impl IdeallDesktop {
             input.set_value(saved.server_base_url, window, cx);
         });
 
-        let code = self.sync_code_input.read(cx).value().to_string();
-        if !code.trim().is_empty() {
-            if !is_valid_sync_code(&code) {
+        let sync_code = self.sync_code_input.read(cx).value().to_string();
+        if !sync_code.trim().is_empty() {
+            if !is_valid_sync_code(&sync_code) {
                 return Err("同步码必须恰好包含 32 位十六进制字符".into());
             }
             self.secret_store
-                .set(SecretKey::SyncCode, &normalize_sync_code(&code))
+                .set(SecretKey::SyncCode, &normalize_sync_code(&sync_code))
                 .map_err(|error| error.to_string())?;
             self.sync_code_configured = true;
             self.sync_code_input
@@ -1651,7 +1644,7 @@ impl IdeallDesktop {
                 return;
             }
         };
-        let code = match self.secret_store.get(SecretKey::SyncCode) {
+        let sync_code = match self.secret_store.get(SecretKey::SyncCode) {
             Ok(Some(value)) => value,
             Ok(None) => {
                 self.status = Some("请先保存同步码".into());
@@ -1685,13 +1678,13 @@ impl IdeallDesktop {
             let mut transport = HttpSyncTransport::new(&settings.server_base_url, &token)
                 .map_err(|error| error.to_string())?;
             let subscriptions = workspace
-                .sync_subscriptions(&code, &mut transport)
+                .sync_subscriptions(&sync_code, &mut transport)
                 .map_err(|error| error.to_string())?;
             let notes = workspace
-                .sync_notes(&code, &mut transport)
+                .sync_notes(&sync_code, &mut transport)
                 .map_err(|error| error.to_string())?;
             let bookmarks = workspace
-                .sync_bookmarks(&code, &mut transport)
+                .sync_bookmarks(&sync_code, &mut transport)
                 .map_err(|error| error.to_string())?;
             Ok::<_, String>((subscriptions, notes, bookmarks))
         });
@@ -1926,9 +1919,9 @@ impl IdeallDesktop {
         }
         let replaced = text.replace(&query, &replacement);
         self.editor.suppress_events = true;
-        if self.editor.active_engine_id.as_deref() == Some("ideall.code") {
+        if self.editor.active_engine_id.as_deref() == Some("ideall.text") {
             self.editor
-                .code_input
+                .text_input
                 .update(cx, |input, cx| input.set_value(replaced, window, cx));
         } else {
             self.editor
@@ -2020,9 +2013,9 @@ impl IdeallDesktop {
                         .update(cx, |input, cx| input.set_value(title.clone(), window, cx));
                     self.editor.suppress_events = false;
                     if self.editor.selected_kind == Some(NodeKind::File) {
-                        let language = code_language_for_node(&self.service, &id);
+                        let language = text_highlight_for_node(&self.service, &id);
                         self.editor
-                            .code_input
+                            .text_input
                             .update(cx, |input, cx| input.set_highlighter(language, cx));
                     }
                 }
@@ -2168,7 +2161,7 @@ fn engine_id(kind: NodeKind) -> &'static str {
         NodeKind::Folder => "ideall.directory",
         NodeKind::Note => "ideall.note",
         NodeKind::Bookmark => "ideall.bookmark",
-        NodeKind::File => "ideall.preview",
+        NodeKind::File => "ideall.text",
         NodeKind::Feed => "ideall.feed",
         NodeKind::Thread => "ideall.thread",
     }
@@ -2248,7 +2241,7 @@ fn main() {
             gpui_component::init(cx);
             Theme::change(ThemeMode::Light, None, cx);
             configure_desktop_theme(cx);
-            actions::init(cx);
+            workbench::init(cx);
             let initialized = (|| {
                 if let Some(error) = secure_store_error {
                     return Err(error);

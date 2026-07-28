@@ -36,15 +36,15 @@ FileSystem 对上提供受控的读取、列举、写入和动作语义；provid
 
 Engine 描述“如何打开一个 FileRef”。匹配输入包括 media type、文件属性、显式用户选择和
 平台 capability。标签身份由 `FileRef + Engine` 组成，因此同一内容可以同时用 Editor、
-Preview、Code 或 Browser 打开。
+Preview、Text 或 Browser 打开。
 
 Engine registry 位于 domain 层，只保存无 GPUI 类型的 descriptor 与选择规则。具体 renderer
 由桌面或移动组合根注册：
 
-- 桌面可组合 Editor、Preview、Code、Browser 与平台外部打开；
+- 桌面可组合 Editor、Preview、Text、Browser 与平台外部打开；
 - 移动端按触屏、系统输入代理和平台能力选择 renderer；
 - 不可用能力返回明确降级，不显示无法兑现的入口；
-- Browser、Shell 等 Engine 不升级为一级导航分区。
+- Browser 等 Engine 不升级为一级导航分区。
 
 ## Display
 

@@ -11,9 +11,9 @@
 | [development.md](development.md) | 目录结构、开发命令、依赖约束与贡献入口 |
 | [file-system-engine-architecture.md](file-system-engine-architecture.md) | Storage → FileSystem → FileRef → Engine → Display 契约 |
 | [design/ui-style.md](design/ui-style.md) | GPUI 视觉、布局和设计 Token |
-| [design/desktop-components.md](design/desktop-components.md) | Desktop Shell、Explorer、Editor、Browser 边界 |
+| [design/desktop-components.md](design/desktop-components.md) | Desktop Workbench、Explorer、Editor、Browser 边界 |
 | [design/desktop-editor.md](design/desktop-editor.md) | Notion 式块编辑、快捷键与数据安全不变量 |
-| [design/gpui-migration.md](design/gpui-migration.md) | 全平台 GPUI 决策、迁移证据与人工门禁 |
+| [platform-support.md](platform-support.md) | 五平台构建证据、能力降级与人工门禁 |
 | [../.github/SECURITY.md](../.github/SECURITY.md) | 安全策略、信任边界与漏洞报告 |
 
 ## 操作手册

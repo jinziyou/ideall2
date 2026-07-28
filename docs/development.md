@@ -14,7 +14,6 @@ native/
 
 scripts/                      # 仓库版本、发布和 CI 维护脚本
 docs/                         # 架构、设计与操作手册
-registry/                     # 官方签名扩展目录源
 ```
 
 ## 环境

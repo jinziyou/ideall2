@@ -1,8 +1,8 @@
-use super::*;
-use crate::actions::{
+use super::actions::{
     ImportFiles, NewFolder, NewNote, NewTextFile, OpenSelectedNode, RenameSelectedNode,
     TrashSelectedNode,
 };
+use crate::*;
 
 impl IdeallDesktop {
     fn render_top_bar(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
@@ -1340,7 +1340,7 @@ impl IdeallDesktop {
             Some(NodeKind::Note | NodeKind::Bookmark | NodeKind::File)
         );
         let editor_mode = self.editor.mode();
-        let show_code = editor_mode == EditorMode::Code;
+        let show_text = editor_mode == EditorMode::Text;
         let show_preview = editor_mode == EditorMode::Preview;
         let engine_capabilities = engine_runtime_capabilities(EnginePlatform::current_desktop());
         let delegated_capability = self
@@ -1362,7 +1362,7 @@ impl IdeallDesktop {
             .selectable(true)
             .scrollable(true);
         let note_toolbar_visible =
-            self.note_editor_available() && !show_code && !show_preview && !show_delegated_engine;
+            self.note_editor_available() && !show_text && !show_preview && !show_delegated_engine;
         let slash_commands = (note_toolbar_visible && self.note_editor_focused(window, cx))
             .then(|| {
                 let cursor = self.editor.body_input.read(cx).cursor_position();
@@ -1401,33 +1401,23 @@ impl IdeallDesktop {
                             .child(self.editor.title_input.read(cx).value().to_string()),
                     )
                     .when(
-                        self.editor.selected_kind == Some(NodeKind::File),
+                        self.editor.selected_kind == Some(NodeKind::File)
+                            && self.editor.body_editable,
                         |toolbar| {
-                            toolbar
-                                .child(
-                                    Button::new("engine-code")
-                                        .label("代码")
-                                        .small()
-                                        .ghost()
-                                        .selected(show_code)
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.set_engine_preference("ideall.code", window, cx);
-                                        })),
-                                )
-                                .child(
-                                    Button::new("engine-preview")
-                                        .label("预览")
-                                        .small()
-                                        .ghost()
-                                        .selected(show_preview)
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.set_engine_preference(
-                                                "ideall.preview",
-                                                window,
-                                                cx,
-                                            );
-                                        })),
-                                )
+                            let target_engine = if show_preview {
+                                "ideall.text"
+                            } else {
+                                "ideall.preview"
+                            };
+                            toolbar.child(
+                                Button::new("toggle-file-view")
+                                    .label(if show_preview { "文本" } else { "预览" })
+                                    .small()
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.set_engine_preference(target_engine, window, cx);
+                                    })),
+                            )
                         },
                     )
                     .when(
@@ -1632,9 +1622,9 @@ impl IdeallDesktop {
                     .flex_col()
                     .relative()
                     .bg(rgb(EDITOR))
-                    .when(show_code, |body| {
+                    .when(show_text, |body| {
                         body.child(
-                            Input::new(&self.editor.code_input)
+                            Input::new(&self.editor.text_input)
                                 .h_full()
                                 .appearance(false)
                                 .bordered(false)
@@ -1705,7 +1695,7 @@ impl IdeallDesktop {
                         )
                     })
                     .when(
-                        !show_code
+                        !show_text
                             && !show_preview
                             && !show_delegated_engine
                             && self.editor.selected_kind == Some(NodeKind::Note),
@@ -1733,7 +1723,7 @@ impl IdeallDesktop {
                         },
                     )
                     .when(
-                        !show_code
+                        !show_text
                             && !show_preview
                             && !show_delegated_engine
                             && self.editor.selected_kind != Some(NodeKind::Note),

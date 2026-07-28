@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url"
 import { runTestFile } from "./lib/test-runner.mjs"
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url)
-const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url))
+const SCRIPT_DIR = path.dirname(SCRIPT_PATH)
 const HELP = `用法:
   pnpm test:scripts
   pnpm test:scripts -- <路径或文件名子串...>
@@ -105,7 +105,7 @@ export async function main(argv = process.argv.slice(2)) {
   const results = []
   const parallelFiles = testFiles.filter((file) => !SERIAL_TEST_NAMES.has(path.basename(file)))
   const serialFiles = testFiles.filter((file) => SERIAL_TEST_NAMES.has(path.basename(file)))
-  // 时序测试先在空闲启动窗口执行，避免前一批构建/HTTP fixture 的回收抖动影响 150ms 边界。
+  // 时序测试先在空闲启动窗口执行，避免其它 fixture 的启动与回收抖动干扰信号边界。
   await runBatch(serialFiles, 1, results)
   await runBatch(parallelFiles, Math.min(availableParallelism(), 4), results)
   const successCount = results.filter(passed).length

@@ -1559,7 +1559,7 @@ mod mobile {
                     return;
                 }
             };
-            let code = match self.secret_store.get(SecretKey::SyncCode) {
+            let sync_code = match self.secret_store.get(SecretKey::SyncCode) {
                 Ok(Some(value)) => value,
                 Ok(None) => {
                     self.status = "请先保存同步码".into();
@@ -1592,13 +1592,13 @@ mod mobile {
                 let mut transport = HttpSyncTransport::new(&settings.server_base_url, &token)
                     .map_err(|error| error.to_string())?;
                 let subscriptions = workspace
-                    .sync_subscriptions(&code, &mut transport)
+                    .sync_subscriptions(&sync_code, &mut transport)
                     .map_err(|error| error.to_string())?;
                 let notes = workspace
-                    .sync_notes(&code, &mut transport)
+                    .sync_notes(&sync_code, &mut transport)
                     .map_err(|error| error.to_string())?;
                 let bookmarks = workspace
-                    .sync_bookmarks(&code, &mut transport)
+                    .sync_bookmarks(&sync_code, &mut transport)
                     .map_err(|error| error.to_string())?;
                 Ok::<_, String>((subscriptions, notes, bookmarks))
             });
@@ -1932,7 +1932,7 @@ mod mobile {
             NodeKind::Folder => "ideall.directory",
             NodeKind::Note => "ideall.note",
             NodeKind::Bookmark => "ideall.bookmark",
-            NodeKind::File => "ideall.preview",
+            NodeKind::File => "ideall.text",
             NodeKind::Feed => "ideall.feed",
             NodeKind::Thread => "ideall.thread",
         }

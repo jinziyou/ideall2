@@ -64,7 +64,7 @@
   范围再计算中心，不能生成屏幕外的默认坐标。Linux X11 必须使用 RandR 的真实 monitor，
   不能把多屏联合 root screen 当成主显示器；未标记 primary 时使用第一个活动 monitor。
   Wayland compositor 可按协议接管最终位置。
-- Browser 与 Shell 组件本身不构成导航项；当前挂载状态以组件文档为准。
+- Browser Engine 不构成一级导航项；其挂载状态以组件文档为准。
 - 侧边导航栏宽 48px，以 36px 图标按钮和 Tooltip 提供五个固定分区；深色轨道只使用
   智能绿色标识当前项。项目、最近与浏览位于
   上组，应用与设置位于下组。它只负责切换分区，不承载目录操作。
@@ -117,14 +117,9 @@
 
 ## 7. 组件规则
 
-- `view.rs` 只组合工作台；组件专属状态、动作和纯逻辑进入对应目录。
-- Editor、Explorer、Browser、Shell 的职责和挂载状态见
+- `workbench/view.rs` 只组合工作台；组件专属状态、动作和纯逻辑进入对应目录。
+- Editor、Explorer 与 Browser 的职责和挂载状态见
   [desktop-components.md](desktop-components.md)。
 - SQLite、同步、Agent 和安全存储调用停留在 application/adapters 边界，不能下沉到纯视图。
 - 跨桌面/移动共享的文案、导航和 Token 进入 `ideall-presentation`，不得共享 GPUI 类型。
 - 新可见组件需要覆盖正常、空、加载、只读、失败和平台降级状态。
-
-## 8. 旧兼容层
-
-`src/` 中的 CSS/Tailwind 只服务旧数据导出兼容层。维护它时应沿用既有 Token 和组件，避免
-扩大视觉改造范围；任何新生产界面都必须在 `native/apps/**` 实现。

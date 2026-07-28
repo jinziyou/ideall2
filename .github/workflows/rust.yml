@@ -27,8 +27,44 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Resolve platform scope
+    runs-on: ubuntu-22.04
+    outputs:
+      desktop: ${{ steps.scope.outputs.desktop }}
+      mobile: ${{ steps.scope.outputs.mobile }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: scope
+        name: Classify changed paths
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          desktop=true
+          mobile=true
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+            desktop=false
+            mobile=false
+            if grep -Eq '^(\.github/workflows/rust\.yml|package\.json|native/(Cargo\.(toml|lock)|rust-toolchain\.toml|updater-public-key\.txt|THIRD_PARTY_LICENSES\.md|crates/|apps/ideall-desktop/|scripts/(package-desktop|verify-artifact|verify-linux-binary)))' <<<"$changed"; then
+              desktop=true
+            fi
+            if grep -Eq '^(\.github/workflows/rust\.yml|package\.json|\.github/actions/(setup-cargo-ndk|setup-xcodegen)/|native/(Cargo\.(toml|lock)|rust-toolchain\.toml|updater-public-key\.txt|crates/|apps/ideall-mobile/|vendor/gpui-mobile/|scripts/(smoke-android|smoke-ios|verify-artifact|verify-gpui-mobile)))' <<<"$changed"; then
+              mobile=true
+            fi
+          fi
+          echo "desktop=$desktop" >> "$GITHUB_OUTPUT"
+          echo "mobile=$mobile" >> "$GITHUB_OUTPUT"
+
   native:
     name: native fmt + check + clippy + test
+    needs: changes
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
@@ -36,11 +72,12 @@ jobs:
         with:
           persist-credentials: false
       - name: Verify gpui-mobile upstream provenance
+        if: needs.changes.outputs.mobile == 'true'
         run: bash native/scripts/verify-gpui-mobile-vendor.sh --upstream
       - name: Install GPUI Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfontconfig1-dev libfreetype6-dev libxcb1-dev libxkbcommon-x11-dev libvulkan-dev rpm
+          sudo apt-get install -y libfontconfig1-dev libfreetype6-dev libxcb1-dev libxkbcommon-x11-dev libvulkan-dev
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.96.0
@@ -58,14 +95,35 @@ jobs:
         run: cargo check --locked -p ideall-mobile --features mobile-ui-host-check
         working-directory: native
       - name: Clippy (warnings are errors)
-        run: cargo clippy --locked -p ideall-protocol -p ideall-domain -p ideall-storage -p ideall-application -p ideall-sync -p ideall-sync-http -p ideall-agent -p ideall-acp -p ideall-secrets -p ideall-updater -p ideall-cli -p ideall-desktop --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --exclude ideall-mobile -- -D warnings
         working-directory: native
       - name: Clippy gpui-mobile UI (warnings are errors)
         run: cargo clippy --locked -p ideall-mobile --features mobile-ui-host-check -- -D warnings
         working-directory: native
-      - name: Test shared core
-        run: cargo test --locked -p ideall-protocol -p ideall-domain -p ideall-storage -p ideall-application -p ideall-sync -p ideall-sync-http -p ideall-agent -p ideall-acp -p ideall-secrets -p ideall-updater -p ideall-cli
+      - name: Test workspace
+        run: cargo test --locked --workspace
         working-directory: native
+
+  native-linux-preview:
+    name: native desktop (linux)
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install GPUI Linux packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libfreetype6-dev libxcb1-dev libxkbcommon-x11-dev libvulkan-dev rpm
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.96.0
+      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: ./native -> target
       - name: Build and package native Linux preview
         run: |
           cargo build --locked --release -p ideall-desktop
@@ -90,6 +148,8 @@ jobs:
 
   native-desktop-platforms:
     name: native desktop (${{ matrix.name }})
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -154,6 +214,8 @@ jobs:
 
   native-android:
     name: native Android APK and emulator smoke
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 100
     env:
@@ -246,6 +308,8 @@ jobs:
 
   native-ios:
     name: native iOS simulator
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
     runs-on: macos-15
     timeout-minutes: 75
     steps:

@@ -61,7 +61,7 @@ if (fixtureMode) {
   await runFixture(fixtureMode)
 } else {
   const { afterEach, test } = await import("node:test")
-  const { parseRunnerArgs, runTestFile } = await import("./lib/test-runner.mjs")
+  const { runTestFile } = await import("./lib/test-runner.mjs")
   const { isPortAvailable, sleep } = await import("./lib/process.mjs")
   const tempRoots = []
 
@@ -91,31 +91,10 @@ if (fixtureMode) {
     return address.port
   }
 
-  test("runner options accept bounded numeric overrides and reject unknown flags", () => {
-    const parsed = parseRunnerArgs(
-      ["--timeout-ms=500", "--log-limit-kb", "4", "--slow-count", "2", "filesystem"],
-      {},
-    )
-    assert.equal(parsed.timeoutMs, 500)
-    assert.equal(parsed.logLimitBytes, 4 * 1024)
-    assert.equal(parsed.slowCount, 2)
-    assert.deepEqual(parsed.filters, ["filesystem"])
-    assert.throws(() => parseRunnerArgs(["--unknown"], {}), /未知选项/)
-  })
-
-  test("runner help remains available when test environment overrides are invalid", () => {
-    const parsed = parseRunnerArgs(["--help"], {
-      IDEALL_TEST_TIMEOUT_MS: "not-a-number",
-      IDEALL_TEST_LOG_LIMIT_KB: "also-invalid",
-    })
-    assert.equal(parsed.help, true)
-    assert.deepEqual(parsed.filters, [])
-  })
-
   test("runTestFile times out and escalates TERM to KILL", async () => {
     const result = await runTestFile(SELF, {
       ...fixtureOptions("hang"),
-      // 覆盖率全量测试后的高负载环境也要留出 fixture 安装 SIGTERM handler 的启动窗口。
+      // 高负载 CI 环境也要留出 fixture 安装 SIGTERM handler 的启动窗口。
       timeoutMs: 500,
     })
     assert.equal(result.timedOut, true)
@@ -152,7 +131,7 @@ if (fixtureMode) {
         IDEALL_FIXTURE_PORT: String(port),
         IDEALL_FIXTURE_PID_FILE: pidFile,
       }),
-      // 这里要验证“已启动的孙进程”会被进程组清理；覆盖率全量测试后的 CPU 负载下，
+      // 这里要验证“已启动的孙进程”会被进程组清理；CI 的 CPU 负载下，
       // 两层 Node 冷启动偶尔超过 500ms。给前置监听留足时间，不改变 TERM→KILL 的短宽限期。
       timeoutMs: 2_000,
     })

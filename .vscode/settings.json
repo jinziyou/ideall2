@@ -1,8 +1,11 @@
 {
+  "rust-analyzer.linkedProjects": ["native/Cargo.toml"],
   "files.exclude": {
-    "**/.next": true,
-    "**/out": true,
-    "**/node_modules": true,
-    "**/*.tsbuildinfo": true
+    "native/.link-libs": true,
+    "native/target": true,
+    "native/apps/ideall-mobile/platforms/android/.gradle": true,
+    "native/apps/ideall-mobile/platforms/android/app/build": true,
+    "native/apps/ideall-mobile/platforms/ios/build": true,
+    "**/node_modules": true
   }
 }

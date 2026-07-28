@@ -71,7 +71,8 @@ protocol → domain → application → adapters → UI → platform app
 cd native
 cargo fmt --all
 cargo test --locked --workspace
-cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo clippy --locked --workspace --all-targets --exclude ideall-mobile -- -D warnings
+cargo clippy --locked -p ideall-mobile --features mobile-ui-host-check -- -D warnings
 ```
 
 根目录入口会额外覆盖移动 host-check 和维护脚本：

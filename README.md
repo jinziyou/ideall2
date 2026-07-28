@@ -1,5 +1,12 @@
 # ideall
 
+> [!CAUTION]
+> **冻结归档：Tauri V2**
+>
+> 本分支只保留旧版 V2 数据导出与迁移参考，不再接收功能、依赖或安全维护，也不进入生产
+> 发布。当前 GPUI 实现与日常开发位于 `dev`，稳定发布位于 `main`。此归档的最终快照同时
+> 标记为 `tauri-v2-final`。
+
 [![License: Apache 2.0](<https://img.shields.io/badge/License-Apache%202.0-blue.svg>)](LICENSE)
 
 **功能定位：个人信息终端**

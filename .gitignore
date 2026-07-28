@@ -11,12 +11,6 @@
 # testing
 /coverage
 
-# next.js
-/.next/
-
-# production
-/build
-
 # misc
 .DS_Store
 *.pem
@@ -34,15 +28,10 @@ yarn-error.log*
 # vercel
 .vercel
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
-# app: Next 静态导出产物 (output: export)。Tauri 工程的 target/gen 见 src-tauri/.gitignore
-/out/
-/public/generated/
+# release and native build outputs
 /registry-ready/
 /native/target/
+/native/.link-libs/
 /native/apps/ideall-mobile/platforms/android/.gradle/
 /native/apps/ideall-mobile/platforms/android/app/build/
 /native/apps/ideall-mobile/platforms/android/app/src/main/jniLibs/
@@ -62,8 +51,3 @@ next-env.d.ts
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 .claude/worktrees/
-
-# 设计系统同步缓存与打包产物（由外部同步工具重建，不进入应用源码）
-/.design-sync/
-/.ds-sync/
-/ds-bundle/

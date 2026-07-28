@@ -1,9 +1,0 @@
-[[permission]]
-identifier = "allow-capture-take-pending"
-description = "Allows the trusted main window to drain URL and file shares already accepted by the native shell."
-commands.allow = ["capture_take_pending"]
-
-[[permission]]
-identifier = "deny-capture-take-pending"
-description = "Denies draining pending native capture shares."
-commands.deny = ["capture_take_pending"]

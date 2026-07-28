@@ -4,7 +4,7 @@ import { readdir } from "node:fs/promises"
 import { availableParallelism } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { runTestFile } from "./run-tests.mjs"
+import { runTestFile } from "./lib/test-runner.mjs"
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url)
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url))

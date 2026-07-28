@@ -14,14 +14,18 @@
 | [runtime-extension-packages.md](runtime-extension-packages.md) | 联网签名目录、桌面扩展包格式、Minisign 验证、connector 生命周期与残余风险 |
 | [development.md](development.md) | 目录结构、依赖边界、开发命令与贡献约定 |
 | [design/ui-style.md](design/ui-style.md) | UI 视觉和组件规范 |
+| [design/desktop-components.md](design/desktop-components.md) | GPUI 桌面 Editor/Explorer/Browser/Shell 边界与挂载状态 |
+| [design/desktop-editor.md](design/desktop-editor.md) | 桌面 Notion 式块编辑、斜杠命令、快捷键与数据安全不变量 |
 | [../.github/SECURITY.md](../.github/SECURITY.md) | 安全策略与漏洞报告方式 |
 
 ## 操作手册
 
 | 文档 | 用途 |
 | --- | --- |
-| [app.md](app.md) | Tauri 开发、构建、平台矩阵、签名与发布 |
-| [app-data-safety-acceptance.md](app-data-safety-acceptance.md) | 真实 Tauri/keychain、加密归档与重启恢复验收 |
+| [../native/README.md](../native/README.md) | GPUI 原生开发、构建与平台入口 |
+| [../native/RELEASE.md](../native/RELEASE.md) | GPUI 五平台签名、发布与人工验收 |
+| [app.md](app.md) | 历史 Tauri 兼容层；只用于旧数据导出 |
+| [app-data-safety-acceptance.md](app-data-safety-acceptance.md) | 历史 Tauri/keychain 与归档验收记录 |
 | [release-0.2.md](release-0.2.md) | 0.2 破坏性数据基线、升级清理和当前兼容边界 |
 | [mobile-share-acceptance.md](mobile-share-acceptance.md) | Android/iOS 系统分享宿主接入、安全契约与平台验收 |
 | [scripts.md](scripts.md) | 验证、冒烟、API codegen 与维护脚本 |
@@ -38,13 +42,13 @@
 | [extension-registry-operations.md](extension-registry-operations.md) | 签名 Registry 的目录真相源、原子发布、服务代理与事故处置 |
 | [local-data-provider.md](local-data-provider.md) | P1 已落地；运行期连接查看/断开已实现，持久 consent 与外部 transport 停放 |
 | [freedesktop-alignment.md](freedesktop-alignment.md) | 已全部落地：S1（XDG 存储分类）、S1b（登记盲区收口）、S2（MIME subclassing）、S3（Engine 关联文件化）、S4（Engine 描述符投影）、S5（recently-used + 缩略图缓存） |
-| [design/gpui-migration.md](design/gpui-migration.md) | 实施中：桌面 GPUI、移动 gpui-mobile 的全平台 Rust 原生化目标、兼容边界与阶段门禁 |
+| [design/gpui-migration.md](design/gpui-migration.md) | 已切换：桌面 GPUI、移动 gpui-mobile 的全平台 Rust 原生化决策、证据与人工门禁 |
 
 ## 历史归档
 
 | 文档 | 用途 |
 | --- | --- |
-| [app-history.md](app-history.md) | App-only 与 Tauri 化阶段记录；当前操作以 `app.md` 为准 |
+| [app-history.md](app-history.md) | App-only 与 Tauri 化阶段记录；当前操作以 `native/README.md` 为准 |
 | [design/archive/README.md](design/archive/README.md) | 已完成或废弃的设计稿、原型与路径快照索引 |
 
 维护文档时应同时更新本索引；路径、命令和部署口径必须以仓库当前实现为准，历史数字不要复制到现行说明中。

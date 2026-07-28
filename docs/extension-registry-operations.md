@@ -12,8 +12,8 @@
 3. 桌面端使用内置官方根重新验证每页，并拒绝序列回退、同序列不同信封、过期分页和条目约束
    违规。发现目录和扩展包下载/安装仍是两条独立验签链。
 
-长期密钥只保留在 `ideall` 的 `TAURI_SIGNING_PRIVATE_KEY` 与
-`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` GitHub Actions Secret。不得复制到 wonita 仓库、服务器环境、
+长期密钥只保留在 `ideall` 的 `IDEALL_UPDATE_PRIVATE_KEY` 与
+`IDEALL_UPDATE_PRIVATE_KEY_PASSWORD` GitHub Actions Secret。不得复制到 wonita 仓库、服务器环境、
 Registry Release 或本地目录。
 
 ## 2. 目录真相源
@@ -40,7 +40,7 @@ Registry Release 或本地目录。
 
 包文件放在 `registry/packages/`。发布工具会拒绝符号链接、越界路径、超过 96 MiB 的文件、未知字段、
 无序权限或 Registry 与包内 manifest 不一致，并从精确包字节计算 `packageSha256`。官方 publisher
-指纹必须与 `src-tauri/tauri.conf.json` 的 updater 根一致；connector Base64、64 MiB 上限及 SHA-256
+指纹必须与 `native/updater-public-key.txt` 的 updater 根一致；connector Base64、64 MiB 上限及 SHA-256
 也会在发布前复核。当前生产目录只接收 `ideall.official`，并在发布侧完整验证包内 manifest 的
 Minisign 主签名与 trusted-comment 全局签名；第三方 publisher 目录要等独立根分发协议后再开放。
 
@@ -53,7 +53,7 @@ Minisign 主签名与 trusted-comment 全局签名；第三方 publisher 目录�
 代码。默认有效期 14 天，sequence 与生成时间使用发布时 epoch 毫秒。发布前会：
 
 - 最多生成 8 页、每页最多 64 条，cursor 只使用 `page_0001` 到 `page_0007`；
-- 实际调用 Tauri signer，并校验签名 key id 与内置 updater 公钥一致；
+- 实际调用 `ideall-cli update-sign`，并校验签名 key id 与内置 updater 公钥一致；
 - 生成包含 size/SHA-256 的 prepared manifest，再逐资产复核；
 - 读取当前生产根页，拒绝 sequence 不递增；
 - 先上传并验证 staging Release，最后切换固定 tag，失败时保留旧 Feed。

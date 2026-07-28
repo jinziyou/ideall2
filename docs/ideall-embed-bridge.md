@@ -458,7 +458,8 @@ class IdeallEmbed {
 - 写回主权：在嵌入应用内"订阅发布者"→ `hub://subscriptions` 出现该项 → home 中枢可见。
 - 双模式：同一 wonita 页独立打开（直连+自登录）与嵌入打开（分流+SSO）均工作。
 - 跨平台：桌面 + Android（iOS 待证书）下 iframe + postMessage + 主题/safe-area 正常。
-- 回归：`pnpm app:export` / lint / typecheck / test 绿。
+- 旧兼容层回归：`pnpm legacy:web:export` / lint / typecheck / test 绿；生产 GPUI
+  另运行 `pnpm native:check` / `native:test` / `native:lint`。
 
 ---
 

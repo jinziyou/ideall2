@@ -42,6 +42,17 @@ pub struct Database {
     connection: Connection,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NodeProjection {
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub sort_key: String,
+    pub kind: NodeKind,
+    pub title: String,
+    pub updated_at: i64,
+    pub deleted: bool,
+}
+
 impl Database {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
         let connection = Connection::open(path)?;
@@ -290,6 +301,48 @@ impl Database {
         rows.map(|row| {
             let raw = row?;
             serde_json::from_str(&raw).map_err(StorageError::from)
+        })
+        .collect()
+    }
+
+    /// Reads only the columns needed by navigation and tree rendering.
+    ///
+    /// Listing a large workspace must not deserialize note bodies, file
+    /// metadata, or Agent thread documents merely to draw the sidebar.
+    pub fn list_node_projections(
+        &self,
+        include_deleted: bool,
+    ) -> Result<Vec<NodeProjection>, StorageError> {
+        let sql = if include_deleted {
+            "SELECT id, parent_id, sort_key, kind, title, updated_at, deleted_at
+             FROM nodes ORDER BY parent_id, sort_key, id"
+        } else {
+            "SELECT id, parent_id, sort_key, kind, title, updated_at, deleted_at
+             FROM nodes WHERE deleted_at IS NULL ORDER BY parent_id, sort_key, id"
+        };
+        let mut statement = self.connection.prepare(sql)?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, Option<i64>>(6)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let (id, parent_id, sort_key, kind, title, updated_at, deleted_at) = row?;
+            Ok(NodeProjection {
+                id,
+                parent_id,
+                sort_key,
+                kind: parse_node_kind(&kind)?,
+                title,
+                updated_at,
+                deleted: deleted_at.is_some(),
+            })
         })
         .collect()
     }
@@ -1106,6 +1159,20 @@ fn node_kind(kind: NodeKind) -> &'static str {
     }
 }
 
+fn parse_node_kind(kind: &str) -> Result<NodeKind, StorageError> {
+    match kind {
+        "folder" => Ok(NodeKind::Folder),
+        "note" => Ok(NodeKind::Note),
+        "bookmark" => Ok(NodeKind::Bookmark),
+        "file" => Ok(NodeKind::File),
+        "feed" => Ok(NodeKind::Feed),
+        "thread" => Ok(NodeKind::Thread),
+        _ => Err(StorageError::Integrity(format!(
+            "stored node kind `{kind}` is invalid"
+        ))),
+    }
+}
+
 fn count(connection: &Connection, table: &str) -> Result<u64, StorageError> {
     let value: i64 = connection.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
         row.get(0)
@@ -1198,6 +1265,30 @@ mod tests {
         let node = database.get_node("n1").unwrap().unwrap();
         assert_eq!(node.base().title, "Note");
         database.quick_check().unwrap();
+    }
+
+    #[test]
+    fn navigation_projection_does_not_deserialize_full_documents() {
+        let mut database = Database::open_in_memory().unwrap();
+        database.replace_from_archive(&archive()).unwrap();
+        database
+            .connection
+            .execute("UPDATE nodes SET document_json = '{}' WHERE id = 'n1'", [])
+            .unwrap();
+
+        assert!(database.list_nodes(false).is_err());
+        assert_eq!(
+            database.list_node_projections(false).unwrap(),
+            vec![NodeProjection {
+                id: "n1".into(),
+                parent_id: None,
+                sort_key: "a0".into(),
+                kind: NodeKind::Note,
+                title: "Note".into(),
+                updated_at: 2,
+                deleted: false,
+            }]
+        );
     }
 
     #[test]

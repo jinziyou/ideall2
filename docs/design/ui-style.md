@@ -1,62 +1,113 @@
-# UI 视觉规范 —— 现代 · 面板 · 留白
+# UI 视觉规范——浅色 IDE 工作台
 
-全站视觉决策的**单一事实来源**。此前这套约定散落两处且互相矛盾（`globals.css` 注释说「白卡 + 柔阴影」、agent 插件的 ui-kit 注释说「border-first 几无阴影」），本页是裁决后的统一口径；`globals.css` 与组件注释与本页不一致时，以本页为准并修正注释。
+> 状态：现行。生产 UI 使用 GPUI；旧 Next.js/Tauri 兼容层只负责 V2 归档导出，
+> 不再决定产品视觉。桌面组件边界见
+> [desktop-components.md](desktop-components.md)。
 
-适用范围：全部 `src/**` 的 UI 代码与外部贡献的 UI PR（见 README「参与贡献」）。
+## 1. 设计方向
 
-## 1. 阴影（border-first，已裁决）
+桌面端采用接近 JetBrains/PyCharm 信息架构、但更强调现代面板与呼吸感的浅色 IDE 工作台：
 
-| 层 | 口径 |
-| --- | --- |
-| 内容卡片 / 面板（`bg-card` 容器、区段卡、列表卡） | **零阴影**，用 `border` 描边分层；hover 用 `hover:border-foreground/20` / `hover:bg-accent`，不用 hover 阴影 |
-| 浮层（菜单 / 对话框 / 悬浮卡 / select / tooltip / toast / sheet） | 统一 `shadow-overlay` 令牌（`--shadow-overlay`，亮/暗各有值，见 `globals.css` 的 `--shadow-overlay-color`）；**不得**散用 Tailwind 默认 `shadow-md/lg` |
-| 控件微阴影（分段滑块 thumb / Switch 钮面 / tabs 活动片） | 允许 `shadow-sm`（hairline 级，向 shadcn 原语看齐） |
+- 浅色为默认且是当前唯一承诺的完整主题。
+- 顶栏、活动栏、项目工具窗、标签条、编辑区和状态栏形成稳定框架。
+- 窗口画布以 8px 间距承载独立活动栏、项目窗和编辑器面板，不让功能区连续贴边。
+- 信息密度适中，依靠面板边界、组间留白和层级字号保持可读性。
+- 文件浏览与编辑是第一优先级；Agent、设置和平台能力不能挤占编辑主区域。
+- 打开方式属于当前文件的 Engine 选择，不为每个 Engine 增加一级导航。
+- 卡片和面板坚持 border-first；工作区面板使用中等圆角，不使用常驻大阴影。
 
-裁决理由：暗色模式下描边分层始终成立，而浅色柔阴影在暗色下发脏；面板密度高的终端类界面用描边更收敛。
+移动端使用单列任务流和底部导航，不照搬桌面 IDE 布局；共享的只有语义文案和无 GPUI 类型
+的设计 Token。
 
-## 2. 颜色
+## 2. Token 单一事实来源
 
-- **语义令牌优先**：一律走 `globals.css` 的 HSL 令牌（`--background/--card/--muted/--accent/…`），禁止新增未经约定的 hex / rgb 字面量；暗色差异原则上只在 `.dark` 令牌层解决。现存例外是 `kbd-node.tsx` 的历史阴影，以及 `code-block-node.tsx` 的语法高亮调色板；它们不应被复制为普通组件写法。
-- **强调色**：靛蓝 `--primary` 是唯一强调色，**每屏只给一个主操作**。
-- **`--pop` / `--flowback`**：严格保留给「关键动作 / 加入我的 / 流回」语义，不得兼职表示运行状态。
-- **`--spoke-*` 三色**（资讯蓝 / 社区绿 / 工具紫）：只用于小圆点、图标 tint、标签，**绝不大面积 fill**。
-- **状态色**：`ok→success`、`warn→warning`、`error→destructive`、`idle→muted-foreground`、`info→info`。全站唯一映射在 `src/ui/status-dot.tsx`（StatusDot）与 `src/ui/chip.tsx`（Chip，配方 `border-{tone}/30 bg-{tone}/10 text-{tone}`）——不要自写状态点/状态药丸。
+生产颜色定义位于
+`native/crates/ideall-presentation/src/lib.rs::color::desktop`。桌面代码只引用语义常量，
+不得在视图中新增散落的 RGB 字面量。
 
-## 3. 圆角阶梯
-
-| 令牌 | 值 | 用途 |
+| Token | 当前值 | 用途 |
 | --- | --- | --- |
-| `rounded-lg`（= `--radius`，1rem） | 便当圆角 | 内容卡片 / 面板 |
-| `rounded-md` / `rounded-sm` | −2px / −4px | 控件（按钮 / 输入框 / 菜单） |
-| `rounded-shell`（0.5rem） | 壳层专用 | 活动栏 / 侧栏 / 标签条 / 状态栏的行与钮 |
+| `CANVAS` | `#f7f8fa` | 窗口底色 |
+| `SURFACE` / `EDITOR` | `#ffffff` | 主内容与编辑器 |
+| `SURFACE_MUTED` / `TOOLBAR` / `STATUS_BAR` | `#f2f3f5` | 工具条、标签和状态区 |
+| `EDITOR_GUTTER` | `#f7f8fa` | 编辑器次级区域 |
+| `INK` | `#1f2329` | 主文本 |
+| `INK_MUTED` | `#5e636d` | 次级文本 |
+| `INK_FAINT` | `#8a8f98` | 元信息与占位 |
+| `BORDER` | `#dfe1e5` | 常规分隔 |
+| `BORDER_STRONG` | `#c9ccd2` | 活动边界与拖拽 |
+| `ACCENT` | `#3574f0` | 当前项、焦点和主操作 |
+| `ACCENT_SOFT` / `SELECTION` | `#e7efff` / `#dce7f8` | 轻量选中背景 |
+| `HOVER` | `#e9eaed` | 悬停反馈 |
 
-注意：`rounded-xl` 及以上**未在令牌层重定义**，会回落 Tailwind 默认值造成「xl 比 lg 更小」的刻度倒挂——**禁用 `rounded-xl+`**，需要更大圆角时先在 `@theme` 补令牌。
+应用启动必须显式选择 `ThemeMode::Light`。未来增加暗色时，应先补齐整套语义 Token、编辑器
+高亮和 WebView/系统控件对齐，再提供切换入口；不得把局部颜色反转称为暗色支持。
 
-## 4. 间距（三档）与排版（type ramp）
+## 3. 桌面布局
 
-- 间距三档：`gap-2`（组内）/ `gap-4`（行间）/ `space-y-8`（区段间）。
-- 内容列：`max-w-2xl / 3xl` + `mx-auto`（留白 = 现代感）。
-- Type ramp：标题 `text-base font-semibold` · 正文 `text-sm` · meta `text-[13px] text-muted-foreground`。
-- 壳层微字号（现状）：标签条 13px、活动栏 11px、徽标 10px——目前仍广泛使用任意值，**待令牌化**（`--text-meta/--text-micro`）；新代码沿用现值，勿再发明新字号。
+```text
+┌──────────────────────────── 顶栏 / 全局搜索 / 主操作 ────────────────────────────┐
+├── 活动栏面板 ──┬──────── 项目工具窗 ────────┬──────────── 标签工作区 ────────────┤
+│ 五个固定分区   │ 文件树、筛选、重命名       │ 标签条                           │
+│                │ 可折叠、可调整宽度         ├──────────────────────────────────┤
+│                │                            │ Editor / Preview / Browser Engine │
+├────────────────┴────────────────────────────┴──────────────────────────────────┤
+│ 状态栏：本地状态、项目数、存储和版本                                           │
+└────────────────────────────────────────────────────────────────────────────────┘
+```
 
-## 5. 公共组件（先查再写）
+- 一级导航固定为“我的 / 活动 / 浏览 / 应用 / 设置”。
+- Browser 与 Shell 组件本身不构成导航项；当前挂载状态以组件文档为准。
+- 活动栏宽 64px，以 48px 导航单元提供图标和短标签；当前项使用浅蓝面板，不使用深色常驻轨道。
+- 项目工具窗默认约 286px，可在 220–520px 范围调整并持久化。
+- 编辑区始终获得剩余空间，最小尺寸和溢出必须显式处理。
+- Activity、Explorer、Editor 之间保持 8px 画布间距，面板自身负责圆角、边框和裁切。
+- Note 在 IDE 壳内使用最大 880px 的居中文档画布和 Notion 式块操作；文件、Preview 与
+  Browser 继续使用满宽 Engine 区域。编辑行为见
+  [desktop-editor.md](desktop-editor.md)。
+- 顶栏高度约 52px，标签条约 44px，笔记操作面板所在区域约 56px，状态栏约 26–30px。
 
-通用原语一律放 `src/ui`，**禁止在 modules / plugins 里另起并行实现**（agent 的 ui-kit 通用件已下沉，仅保留 AiPage/ListRow/AddButton/ComposerShell 等 agent 组合件）：
+## 4. 排版与间距
 
-| 需求 | 组件 |
-| --- | --- |
-| 区段卡片 / 设置行 / 内容浮动面板 | `@/ui/panel`（Panel / SettingRow / SurfacePanel） |
-| 状态点 / 计数徽标 | `@/ui/status-dot`（StatusDot / CountBadge） |
-| 状态药丸 | `@/ui/chip`（Chip） |
-| 开关 | `@/ui/switch`（Switch） |
-| 错误兜底 | `@/ui/error-boundary`（ErrorBoundary，标签内容已默认包裹） |
-| 空态 | `@/ui/empty-state` |
+- 标题：16–20px，按页面层级使用，不在工具栏中制造大标题。
+- 正文与控件：13–14px。
+- 元信息、状态栏和快捷键提示：11–12px。
+- 组内间距优先 8px，工具条横向间距 8–12px，页面内容区 24–40px。
+- 控件使用小/中圆角；大圆角只用于启动失败、空态等独立面板。
+- 长标题必须截断；状态文本应有上限，不允许把底层原始错误无限铺到界面。
 
-手写 `rounded-lg border bg-card p-*` 的裸面板属于待迁移的历史写法（如 `home/settings`、`overview`），新代码请用 Panel 家族。
+## 5. 交互状态
 
-## 6. 动效与可访问性
+- 当前活动项使用浅蓝底和明确文本色，不依赖颜色极细微变化。
+- Hover 只改变浅背景或边框，不移动布局。
+- 主操作每个局部区域最多一个；危险操作必须使用危险色并经过确认。
+- 只读、不可用和平台降级必须显示真实原因，不提供无效按钮。
+- 空工作台提供“新建文件 / 新建笔记 / 导入”这类下一步，不显示技术栈占位。
+- 后台操作要区分运行中、成功、失败、取消和超时；迟到结果不得覆盖更新状态。
 
-- `prefers-reduced-motion` 已有全局兜底（`globals.css`），组件无需逐个守卫。
-- 壳层过渡基准 200ms（侧栏折叠 / AI 栏开合已对齐）；动效节奏令牌（duration/easing）待建，新代码优先复用 200ms。
-- 焦点环统一 `focus-visible:ring-2 focus-visible:ring-ring`（壳层内嵌场景加 `ring-inset`），去掉 `outline-none` 时必须给出替代焦点样式。
-- 触屏命中区：视觉尺寸可小于 44px，但需按 `tab-bar.tsx` 的既有模式用 `pointer-coarse:` 伪元素扩到 ~44px（WCAG 2.5.8）。
+## 6. 键盘与可访问性
+
+- 搜索：`Ctrl/⌘ K`、`Ctrl/⌘ P`。
+- 新建、保存、关闭标签：`Ctrl/⌘ N`、`Ctrl/⌘ S`、`Ctrl/⌘ W`。
+- 标签循环：`Ctrl+Tab`、`Ctrl+Shift+Tab`。
+- 项目窗：`Alt+1`；重命名：`F2`；查找/替换：`Ctrl/⌘ F`、
+  `Ctrl/⌘ Alt+F`。
+- 笔记正文聚焦时提供粗体、斜体、删除线、行内代码、块移动和复制快捷键；具体映射见
+  [desktop-editor.md](desktop-editor.md#快捷键)。
+- 焦点顺序必须遵循顶栏 → 活动栏 → 项目窗 → 标签/编辑区。
+- 键盘选择与鼠标选择使用同一状态；隐藏或折叠节点不得进入相对选择序列。
+- 移动触摸目标不得小于 44px，并继续通过原生文本代理验证 IME 与辅助功能。
+
+## 7. 组件规则
+
+- `view.rs` 只组合工作台；组件专属状态、动作和纯逻辑进入对应目录。
+- Editor、Explorer、Browser、Shell 的职责和挂载状态见
+  [desktop-components.md](desktop-components.md)。
+- SQLite、同步、Agent 和安全存储调用停留在 application/adapters 边界，不能下沉到纯视图。
+- 跨桌面/移动共享的文案、导航和 Token 进入 `ideall-presentation`，不得共享 GPUI 类型。
+- 新可见组件需要覆盖正常、空、加载、只读、失败和平台降级状态。
+
+## 8. 旧兼容层
+
+`src/` 中的 CSS/Tailwind 只服务旧数据导出兼容层。维护它时应沿用既有 Token 和组件，避免
+扩大视觉改造范围；任何新生产界面都必须在 `native/apps/**` 实现。

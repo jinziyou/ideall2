@@ -51,6 +51,10 @@ media_session = []
 
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
+# Upstream includes illustrative snippets that intentionally reference
+# application-defined factories/imports. They are documentation examples, not
+# standalone doctests; compiling them makes `cargo test --workspace` fail.
+doctest = false
 
 # ── shared deps (all platforms) ──────────────────────────────────────────────
 

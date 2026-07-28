@@ -16,6 +16,7 @@ landed upstream, plus workspace compatibility cleanup:
 - bridge Android system-bar and display-cutout `WindowInsets` into GPUI logical safe areas,
   including Android 15 edge-to-edge windows whose NDK content rect remains empty;
 - keep vendored code warning-free under ideall's host-target Clippy gate;
+- disable standalone doctests for upstream snippets that require application-defined factories;
 - let the parent workspace own dependency patches and build profiles;
 - pin Zed `gpui` and `gpui_wgpu` to revision
   `74798c68d5c63d31e2ccca5c8f5ec0a02c90679c`, which provides the embedded application handle.

@@ -15,11 +15,14 @@ gpui-component = { version = "=0.5.1", features = ["tree-sitter-languages"] }
 ideall-application = { path = "../../crates/ideall-application" }
 ideall-acp = { path = "../../crates/ideall-acp" }
 ideall-domain = { path = "../../crates/ideall-domain" }
+ideall-presentation = { path = "../../crates/ideall-presentation" }
 ideall-protocol = { path = "../../crates/ideall-protocol" }
 ideall-secrets = { path = "../../crates/ideall-secrets" }
 ideall-sync = { path = "../../crates/ideall-sync" }
 ideall-sync-http = { path = "../../crates/ideall-sync-http" }
 ideall-updater = { path = "../../crates/ideall-updater" }
+shell-words.workspace = true
+url.workspace = true
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 gpui-component = { version = "=0.5.1", features = ["webview"] }

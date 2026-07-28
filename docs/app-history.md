@@ -24,7 +24,7 @@
 - **Agent**：删服务端代理 Route Handler，`agent-chat` 改客户端直连 OpenAI 兼容端点（BYO key 留本地）。
   ⚠️ 浏览器直连受厂商 CORS 限制（本地 Ollama / 放行 CORS 的端点可用）；桌面/移动 App 已接 Tauri HTTP 插件（`@tauri-apps/plugin-http`，Rust 侧请求绕过 CORS）即可全端点可用。
 
-> 验证（Phase 1 当时快照）：`pnpm build`（= `app:export`，21 静态页）✓ · lint ✓ · typecheck ✓ · test 12/12 ✓（测试集此后已扩展，当前命令见 [development.md](development.md#common-commands)）
+> 验证（Phase 1 当时快照）：`pnpm build`（= `app:export`，21 静态页）✓ · lint ✓ · typecheck ✓ · test 12/12 ✓（测试集此后已扩展，当前命令见 [development.md](development.md)）
 > 后端侧：后端数据服务（如 wonita 的 server）的 `CORS_ALLOW_ORIGINS` 需放行 app 来源（`tauri://localhost` / 开发期 `http://localhost:5020`）。
 
 ## ✅ Phase 2 — 平台构建与 CI（桌面 + Android 已接，iOS 待证书）

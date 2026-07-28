@@ -18,7 +18,6 @@ afterEach(async () => {
 async function projectFixture(versions) {
   const root = await mkdtemp(path.join(tmpdir(), "ideall-version-"))
   roots.push(root)
-  await mkdir(path.join(root, "src-tauri"), { recursive: true })
   await mkdir(path.join(root, "native", "scripts"), { recursive: true })
   await mkdir(path.join(root, "native", "apps", "ideall-mobile", "platforms", "android", "app"), {
     recursive: true,
@@ -29,20 +28,8 @@ async function projectFixture(versions) {
       `{"name":"ideall","version":"${versions.package}"}\n`,
     ),
     writeFile(
-      path.join(root, "src-tauri", "tauri.conf.json"),
-      `{"productName":"ideall","version":"${versions.tauri}"}\n`,
-    ),
-    writeFile(
-      path.join(root, "src-tauri", "Cargo.toml"),
-      `[package]\nname = "ideall"\nversion = "${versions.cargo}"\n`,
-    ),
-    writeFile(
-      path.join(root, "src-tauri", "Cargo.lock"),
-      `[[package]]\nname = "ideall"\nversion = "${versions.lock}"\n`,
-    ),
-    writeFile(
       path.join(root, "native", "Cargo.toml"),
-      `[workspace]\nmembers = []\n\n[workspace.package]\nversion = "${versions.package}"\n`,
+      `[workspace]\nmembers = []\n\n[workspace.package]\nversion = "${versions.native}"\n`,
     ),
     writeFile(
       path.join(root, "native", "Cargo.lock"),
@@ -76,26 +63,22 @@ async function projectFixture(versions) {
 test("project versions are validated together before an in-memory update", async () => {
   const root = await projectFixture({
     package: "1.2.3",
-    tauri: "1.2.3",
-    cargo: "1.2.3",
-    lock: "1.2.3",
+    native: "1.2.3",
   })
   const entries = loadProjectVersionState(root)
   assert.equal(assertProjectVersions(entries), "1.2.3")
   const updates = prepareProjectVersionUpdate(entries, "2.0.0-rc.1")
-  assert.equal(updates.length, 9)
+  assert.equal(updates.length, 6)
   assert.ok(updates.every((entry) => entry.nextContents.includes("2.0.0-rc.1")))
 })
 
 test("project version drift fails closed with per-file diagnostics", async () => {
   const root = await projectFixture({
     package: "1.2.3",
-    tauri: "1.2.4",
-    cargo: "1.2.3",
-    lock: "1.2.3",
+    native: "1.2.4",
   })
   assert.throws(
     () => assertProjectVersions(loadProjectVersionState(root)),
-    /package\.json=1\.2\.3.*tauri\.conf\.json=1\.2\.4/,
+    /package\.json=1\.2\.3.*native\/Cargo\.toml=1\.2\.4/,
   )
 })

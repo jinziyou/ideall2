@@ -5,7 +5,7 @@ const HELP = `用法:
   node scripts/check-version.mjs <expected-version>
 
 说明:
-  校验旧 Tauri 与原生 Cargo、桌面打包、移动构建入口的项目版本一致。
+  校验原生 Cargo、桌面打包与移动构建入口的项目版本一致。
   传 expected-version 时，还会校验全部版本与发版目标一致。
 `
 

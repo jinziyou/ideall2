@@ -85,7 +85,7 @@ case "$(uname -s)" in
     install -Dm0755 "${binary}" "${deb_root}/usr/bin/ideall"
     install -Dm0644 "${script_dir}/resources/linux/com.jinziyou.ideall.desktop" \
       "${deb_root}/usr/share/applications/com.jinziyou.ideall.desktop"
-    install -Dm0644 "${repository_dir}/src-tauri/icons/128x128@2x.png" \
+    install -Dm0644 "${script_dir}/resources/icons/icon-256.png" \
       "${deb_root}/usr/share/icons/hicolor/256x256/apps/com.jinziyou.ideall.png"
     install -Dm0644 "${repository_dir}/LICENSE" "${deb_root}/usr/share/doc/ideall/LICENSE"
     install -Dm0644 "${workspace_dir}/THIRD_PARTY_LICENSES.md" \
@@ -103,7 +103,7 @@ case "$(uname -s)" in
       "${rpm_topdir}/SOURCES" "${rpm_topdir}/SPECS" "${rpm_topdir}/SRPMS"
     cp "${binary}" "${rpm_topdir}/SOURCES/ideall"
     cp "${script_dir}/resources/linux/com.jinziyou.ideall.desktop" "${rpm_topdir}/SOURCES/"
-    cp "${repository_dir}/src-tauri/icons/128x128@2x.png" \
+    cp "${script_dir}/resources/icons/icon-256.png" \
       "${rpm_topdir}/SOURCES/com.jinziyou.ideall.png"
     cp "${repository_dir}/LICENSE" "${rpm_topdir}/SOURCES/LICENSE"
     cp "${workspace_dir}/THIRD_PARTY_LICENSES.md" "${rpm_topdir}/SOURCES/THIRD_PARTY_LICENSES.md"
@@ -138,7 +138,7 @@ case "$(uname -s)" in
     app="${stage_dir}/ideall.app"
     mkdir -p "${app}/Contents/MacOS" "${app}/Contents/Resources"
     cp "${binary}" "${app}/Contents/MacOS/ideall"
-    cp "${repository_dir}/src-tauri/icons/icon.icns" "${app}/Contents/Resources/icon.icns"
+    cp "${script_dir}/resources/icons/icon.icns" "${app}/Contents/Resources/icon.icns"
     copy_licenses "${app}/Contents/Resources"
     sed \
       -e "s/@IDEALL_NUMERIC_VERSION@/${numeric_version}/g" \
@@ -222,7 +222,7 @@ case "$(uname -s)" in
         -d "IdeallLicense=$(windows_path "${directory}/LICENSE")" \
         -d "IdeallThirdPartyLicenses=$(windows_path "${directory}/THIRD_PARTY_LICENSES.md")" \
         -d "IdeallReadme=$(windows_path "${directory}/README.md")" \
-        -d "IdeallIcon=$(windows_path "${repository_dir}/src-tauri/icons/icon.ico")" \
+        -d "IdeallIcon=$(windows_path "${script_dir}/resources/icons/icon.ico")" \
         -o "$(windows_path "${msi}")" \
         "$(windows_path "${script_dir}/resources/windows/ideall.wxs")"
     )
@@ -235,7 +235,7 @@ case "$(uname -s)" in
       -DIDEALL_LICENSE="$(windows_path "${directory}/LICENSE")" \
       -DIDEALL_THIRD_PARTY_LICENSES="$(windows_path "${directory}/THIRD_PARTY_LICENSES.md")" \
       -DIDEALL_README="$(windows_path "${directory}/README.md")" \
-      -DIDEALL_ICON="$(windows_path "${repository_dir}/src-tauri/icons/icon.ico")" \
+      -DIDEALL_ICON="$(windows_path "${script_dir}/resources/icons/icon.ico")" \
       -DIDEALL_OUTPUT="$(windows_path "${setup}")" \
       "$(windows_path "${script_dir}/resources/windows/ideall.nsi")"
     sign_windows_file "${msi}"

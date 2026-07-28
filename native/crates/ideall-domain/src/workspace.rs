@@ -39,6 +39,37 @@ pub struct WorkspaceState {
     pub kind: WorkspaceKind,
     pub tabs: Vec<TabDescriptor>,
     pub active_id: Option<String>,
+    #[serde(default)]
+    pub explorer: ExplorerLayoutState,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerLayoutState {
+    #[serde(default = "default_explorer_width")]
+    pub width: u16,
+    #[serde(default)]
+    pub expanded_folders: Vec<String>,
+    #[serde(default = "default_true")]
+    pub visible: bool,
+}
+
+impl Default for ExplorerLayoutState {
+    fn default() -> Self {
+        Self {
+            width: default_explorer_width(),
+            expanded_folders: Vec::new(),
+            visible: true,
+        }
+    }
+}
+
+const fn default_explorer_width() -> u16 {
+    286
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 impl WorkspaceState {
@@ -83,6 +114,29 @@ impl WorkspaceState {
         }
         true
     }
+
+    pub fn activate_next(&mut self) -> bool {
+        self.activate_relative(1)
+    }
+
+    pub fn activate_previous(&mut self) -> bool {
+        self.activate_relative(-1)
+    }
+
+    fn activate_relative(&mut self, offset: isize) -> bool {
+        if self.tabs.is_empty() {
+            return false;
+        }
+        let current = self
+            .active_id
+            .as_deref()
+            .and_then(|active| self.tabs.iter().position(|tab| tab_key(tab) == active))
+            .unwrap_or(0);
+        let len = self.tabs.len() as isize;
+        let next = (current as isize + offset).rem_euclid(len) as usize;
+        self.active_id = self.tabs.get(next).map(tab_key);
+        true
+    }
 }
 
 #[cfg(test)]
@@ -119,5 +173,43 @@ mod tests {
         let second = workspace.open(tab("b", "preview", "B")).to_owned();
         assert!(workspace.close(&second));
         assert_eq!(workspace.active_id.as_deref(), Some(first.as_str()));
+    }
+
+    #[test]
+    fn relative_tab_activation_wraps_in_both_directions() {
+        let mut state = WorkspaceState::default();
+        let first = state
+            .open(TabDescriptor {
+                file: FileRef::new("local", "first"),
+                engine_id: "ideall.note".into(),
+                title: "First".into(),
+                root_id: None,
+                navigation_path: None,
+            })
+            .to_owned();
+        let second = state
+            .open(TabDescriptor {
+                file: FileRef::new("local", "second"),
+                engine_id: "ideall.note".into(),
+                title: "Second".into(),
+                root_id: None,
+                navigation_path: None,
+            })
+            .to_owned();
+
+        assert!(state.activate_next());
+        assert_eq!(state.active_id.as_deref(), Some(first.as_str()));
+        assert!(state.activate_previous());
+        assert_eq!(state.active_id.as_deref(), Some(second.as_str()));
+    }
+
+    #[test]
+    fn legacy_workspace_json_uses_lightweight_explorer_defaults() {
+        let state: WorkspaceState =
+            serde_json::from_str(r#"{"kind":"files","tabs":[],"activeId":null}"#).unwrap();
+
+        assert_eq!(state.explorer, ExplorerLayoutState::default());
+        assert_eq!(state.explorer.width, 286);
+        assert!(state.explorer.visible);
     }
 }

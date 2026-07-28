@@ -12,5 +12,5 @@ pub use archive::{
     ArchiveTrashSnapshot, ArchiveWorkspace, ParsedArchive, WorkspaceArchiveError,
     decrypt_workspace_archive, is_encrypted_workspace_archive, parse_workspace_archive,
 };
-pub use database::{Database, DatabaseCounts, StorageError};
+pub use database::{Database, DatabaseCounts, NodeProjection, StorageError};
 pub use import::{AtomicImportError, AtomicImportResult, import_workspace_archive_atomic};

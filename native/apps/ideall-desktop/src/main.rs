@@ -1,29 +1,50 @@
+mod actions;
+mod browser;
+mod editor;
+mod explorer;
+mod shell;
+mod view;
+
 use std::{path::PathBuf, time::Duration};
 
 use directories::ProjectDirs;
 use gpui::{
-    App, Application, Context, Entity, IntoElement, PathPromptOptions, PromptButton, PromptLevel,
-    Render, SharedString, Subscription, Task, Window, WindowOptions, div, prelude::*, px, rgb,
+    App, Application, Context, Entity, IntoElement, MouseButton, PathPromptOptions, PromptButton,
+    PromptLevel, Render, SharedString, Subscription, Task, TitlebarOptions, Window, WindowBounds,
+    WindowOptions, div, prelude::*, px, rgb, size,
 };
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use gpui_component::webview::WebView;
 use gpui_component::{
-    Disableable as _, Root, Selectable as _, Sizable as _,
+    Disableable as _, PixelsExt as _, Root, Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputEvent, InputState},
+    menu::ContextMenuExt as _,
+    resizable::{ResizablePanelEvent, ResizableState, h_resizable, resizable_panel},
     scroll::ScrollableElement as _,
     text::TextView,
+    theme::{Theme, ThemeMode},
 };
 use ideall_acp::{AcpToolStatus, ExternalAcpConfig, command_exists, run_external_acp};
 use ideall_application::{
     AgentAuditRecord, AgentModelSettings, AgentToolRun, AgentTranscriptMessage, AuditStatus,
-    ExternalAcpSettings, HOME_ROOT_ID, LocalWorkspace, ModelRole, NodeSummary,
-    OpenAiCompatibleClient, SyncSettings,
+    ExternalAcpSettings, HOME_ROOT_ID, LocalWorkspace, ModelRole, NodeSummary, NoteBlockIndent,
+    NoteBlockMove, NoteBlockStyle, NoteInlineStyle, NoteSlashCommand, OpenAiCompatibleClient,
+    SyncSettings, note_slash_commands, note_slash_query,
 };
 use ideall_domain::{
-    EnginePlatform, EnginePreferences, EngineRuntimeKind, TabDescriptor, WorkspaceState,
-    builtin_engines, engine_runtime_capabilities, list_matching_engines, resolve_default_engine,
-    tab_key,
+    EnginePlatform, EnginePreferences, EngineRuntimeKind, ExplorerLayoutState, TabDescriptor,
+    WorkspaceState, builtin_engines, engine_runtime_capabilities, list_matching_engines,
+    resolve_default_engine, tab_key,
+};
+use ideall_presentation::{
+    LatestRequest, NAVIGATION,
+    color::desktop::{
+        ACCENT, ACCENT_SOFT, BORDER, BORDER_STRONG, CANVAS, DANGER, DANGER_BORDER, EDITOR,
+        EDITOR_GUTTER, HOVER, INK, INK_FAINT, INK_MUTED, MESSAGE_TOOL, RAIL_ACTIVE, RAIL_INK,
+        RAIL_MUTED, SELECTION, SURFACE, SURFACE_MUTED, SURFACE_RAISED, WARNING_SOFT,
+    },
+    section_description, section_eyebrow,
 };
 use ideall_protocol::{EngineAccess, EngineDescriptor, FileRef, Node, NodeKind, SubscriptionType};
 use ideall_secrets::{SecretKey, SecretStore as _, SystemSecretStore};
@@ -31,9 +52,18 @@ use ideall_sync::{is_valid_sync_code, normalize_sync_code};
 use ideall_sync_http::HttpSyncTransport;
 use ideall_updater::{AvailableUpdate, UpdateStatus, updater_from_environment};
 
+use browser::BrowserWorkspace;
+use editor::{
+    EditorInputs, EditorMode, EditorWorkspace, LoadedDocument, code_language_for_node, engine_icon,
+    kind_color_for_engine, position_for_byte_offset,
+};
+use explorer::{DraggedNode, ExplorerState, kind_color, kind_icon};
+use shell::ShellWorkspace;
+
 const INFO_PORTAL_URL: &str = "https://www.wonita.link/info";
 const COMMUNITY_PORTAL_URL: &str = "https://www.wonita.link/community";
 const DRAFT_AUTOSAVE_DELAY: Duration = Duration::from_millis(700);
+const SEARCH_DEBOUNCE_DELAY: Duration = Duration::from_millis(180);
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 struct WebView;
@@ -56,29 +86,29 @@ impl Render for DesktopStartupFailure {
             .flex()
             .items_center()
             .justify_center()
-            .bg(rgb(0xf5f7fa))
+            .bg(rgb(CANVAS))
             .child(
                 div()
                     .max_w(px(620.))
                     .p_8()
                     .rounded_xl()
                     .border_1()
-                    .border_color(rgb(0xe1b7b3))
-                    .bg(rgb(0xffffff))
+                    .border_color(rgb(DANGER_BORDER))
+                    .bg(rgb(SURFACE_RAISED))
                     .flex()
                     .flex_col()
                     .gap_3()
                     .child(
                         div()
                             .text_2xl()
-                            .text_color(rgb(0x8f2f28))
+                            .text_color(rgb(DANGER))
                             .child("ideall 无法启动"),
                     )
-                    .child(div().text_color(rgb(0x4b5563)).child(self.message.clone()))
+                    .child(div().text_color(rgb(INK)).child(self.message.clone()))
                     .child(
                         div()
                             .text_sm()
-                            .text_color(rgb(0x6b7280))
+                            .text_color(rgb(INK_MUTED))
                             .child("请检查数据目录权限、磁盘空间与系统安全存储后重新启动。"),
                     ),
             )
@@ -89,22 +119,18 @@ struct IdeallDesktop {
     database_path: PathBuf,
     service: LocalWorkspace,
     secret_store: SystemSecretStore,
-    engines: Vec<EngineDescriptor>,
-    engine_preferences: EnginePreferences,
-    workspace: WorkspaceState,
-    items: Vec<NodeSummary>,
-    selected_id: Option<String>,
-    selected_kind: Option<NodeKind>,
+    editor: EditorWorkspace,
+    explorer: ExplorerState,
+    browser: BrowserWorkspace,
+    shell: ShellWorkspace,
     active_section: SharedString,
     show_trash: bool,
     search_query: String,
+    search_requests: LatestRequest,
+    search_task: Option<Task<()>>,
+    suppress_search_events: bool,
     search_input: Entity<InputState>,
     feed_key_input: Entity<InputState>,
-    title_input: Entity<InputState>,
-    body_input: Entity<InputState>,
-    code_input: Entity<InputState>,
-    active_engine_id: Option<String>,
-    embedded_browser: Option<Entity<WebView>>,
     sync_server_input: Entity<InputState>,
     sync_code_input: Entity<InputState>,
     sync_token_input: Entity<InputState>,
@@ -128,11 +154,6 @@ struct IdeallDesktop {
     agent_audits: Vec<AgentAuditRecord>,
     agent_threads: Vec<NodeSummary>,
     agent_activity_loading: bool,
-    body_editable: bool,
-    suppress_editor_events: bool,
-    draft_revision: u64,
-    autosave_task: Option<Task<()>>,
-    dirty: bool,
     status: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
 }
@@ -144,7 +165,8 @@ impl IdeallDesktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("搜索标题与正文"));
+        let search_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("搜索标题与正文（Ctrl/⌘ K）"));
         let feed_key_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("发布者域名，例如 example.com"));
         let title_input = cx.new(|cx| InputState::new(window, cx).placeholder("标题"));
@@ -152,13 +174,19 @@ impl IdeallDesktop {
             InputState::new(window, cx)
                 .multi_line(true)
                 .rows(12)
-                .placeholder("从这里开始记录……")
+                .searchable(true)
+                .placeholder("从这里开始记录；输入 / 插入内容块……")
         });
         let code_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .code_editor("markdown")
+                .searchable(true)
                 .placeholder("文件内容")
         });
+        let find_input = cx.new(|cx| InputState::new(window, cx).placeholder("在当前文件中查找"));
+        let replace_input = cx.new(|cx| InputState::new(window, cx).placeholder("替换为"));
+        let rename_input = cx.new(|cx| InputState::new(window, cx).placeholder("输入新名称"));
+        let explorer_resize_state = cx.new(|_| ResizableState::default());
         let sync_server = service.load_sync_settings().unwrap_or_default();
         let sync_server_input = cx.new(|cx| {
             InputState::new(window, cx)
@@ -233,55 +261,106 @@ impl IdeallDesktop {
                 this.mark_editor_dirty(cx);
             }
         });
-        let body_subscription = cx.subscribe(&body_input, |this, _, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change) {
-                this.mark_editor_dirty(cx);
-            }
-        });
+        let body_subscription = cx.subscribe_in(
+            &body_input,
+            window,
+            |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::Change => this.mark_editor_dirty(cx),
+                InputEvent::PressEnter { .. } => {
+                    this.complete_note_slash_after_enter(window, cx);
+                }
+                _ => {}
+            },
+        );
         let code_subscription = cx.subscribe(&code_input, |this, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
                 this.mark_editor_dirty(cx);
             }
         });
-        let search_subscription =
-            cx.subscribe(&search_input, |this, input, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Change) {
-                    this.search_query = input.read(cx).value().to_string();
-                    this.show_trash = false;
-                    this.active_section = if this.search_query.trim().is_empty() {
-                        "我的".into()
-                    } else {
-                        "搜索".into()
-                    };
-                    this.refresh_items();
+        let find_subscription = cx.subscribe_in(
+            &find_input,
+            window,
+            |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::Change => {
+                    this.editor.find_cursor = 0;
                     cx.notify();
                 }
+                InputEvent::PressEnter { .. } => {
+                    this.find_next_in_editor(window, cx);
+                }
+                _ => {}
+            },
+        );
+        let replace_subscription = cx.subscribe(&replace_input, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        });
+        let body_observer = cx.observe(&body_input, |_, _, cx| cx.notify());
+        let code_observer = cx.observe(&code_input, |_, _, cx| cx.notify());
+        let search_subscription =
+            cx.subscribe(&search_input, |this, input, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) && !this.suppress_search_events {
+                    this.schedule_search(input.read(cx).value().to_string(), cx);
+                }
             });
+        let rename_subscription = cx.subscribe_in(
+            &rename_input,
+            window,
+            |this, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.commit_explorer_rename(window, cx);
+                }
+            },
+        );
+        let explorer_resize_subscription = cx.subscribe(
+            &explorer_resize_state,
+            |this, state, _: &ResizablePanelEvent, cx| {
+                if let Some(width) = state.read(cx).sizes().first() {
+                    this.explorer.update_panel_width(width.as_f32());
+                    this.persist_workspace();
+                }
+            },
+        );
         let items = service.list_home().unwrap_or_default();
         let workspace = service.load_workspace_state().unwrap_or_default();
+        let explorer_layout = workspace.explorer.clone();
         let engine_preferences = service.load_engine_preferences().unwrap_or_default();
+        let editor = EditorWorkspace::new(
+            builtin_engines(),
+            engine_preferences,
+            workspace,
+            EditorInputs {
+                title: title_input,
+                body: body_input,
+                code: code_input,
+                find: find_input,
+                replace: replace_input,
+            },
+        );
+        let explorer =
+            ExplorerState::new(items, explorer_layout, rename_input, explorer_resize_state);
+        let browser = BrowserWorkspace::new();
+        let shell = ShellWorkspace::new(window, cx);
+        let shell_subscription = shell.subscribe(window, cx);
         let window_activation =
             cx.observe_window_activation(window, Self::window_activation_changed);
         let mut this = Self {
             database_path,
             service,
             secret_store,
-            engines: builtin_engines(),
-            engine_preferences,
-            workspace,
-            items,
-            selected_id: None,
-            selected_kind: None,
+            editor,
+            explorer,
+            browser,
+            shell,
             active_section: "我的".into(),
             show_trash: false,
             search_query: String::new(),
+            search_requests: LatestRequest::default(),
+            search_task: None,
+            suppress_search_events: false,
             search_input,
             feed_key_input,
-            title_input,
-            body_input,
-            code_input,
-            active_engine_id: None,
-            embedded_browser: None,
             sync_server_input,
             sync_code_input,
             sync_token_input,
@@ -305,30 +384,39 @@ impl IdeallDesktop {
             agent_audits: Vec::new(),
             agent_threads: Vec::new(),
             agent_activity_loading: false,
-            body_editable: false,
-            suppress_editor_events: false,
-            draft_revision: 0,
-            autosave_task: None,
-            dirty: false,
             status: None,
             _subscriptions: vec![
                 title_subscription,
                 body_subscription,
                 code_subscription,
+                find_subscription,
+                replace_subscription,
+                body_observer,
+                code_observer,
                 search_subscription,
+                rename_subscription,
+                explorer_resize_subscription,
+                shell_subscription,
                 window_activation,
             ],
         };
-        let active_tab = this.workspace.active_id.as_deref().and_then(|active_id| {
-            this.workspace
-                .tabs
-                .iter()
-                .find(|tab| tab_key(tab) == active_id)
-                .map(|tab| (tab.file.file_id.clone(), tab.engine_id.clone()))
-        });
+        let active_tab = this
+            .editor
+            .workspace
+            .active_id
+            .as_deref()
+            .and_then(|active_id| {
+                this.editor
+                    .workspace
+                    .tabs
+                    .iter()
+                    .find(|tab| tab_key(tab) == active_id)
+                    .map(|tab| (tab.file.file_id.clone(), tab.engine_id.clone()))
+            });
         if let Some((id, engine_id)) = active_tab {
             this.load_node_into_editor(&id, window, cx);
             this.activate_engine(&engine_id, &id, window, cx);
+            this.editor.restore_active_session(window, cx);
         }
         this
     }
@@ -356,15 +444,74 @@ impl IdeallDesktop {
             })
         };
         match result {
-            Ok(items) => self.items = items,
+            Ok(items) => self.explorer.replace_items(items),
             Err(error) => self.status = Some(error.to_string().into()),
         }
+    }
+
+    fn schedule_search(&mut self, query: String, cx: &mut Context<Self>) {
+        self.search_query = query;
+        self.show_trash = false;
+        let request = self.search_requests.start();
+        drop(self.search_task.take());
+        let query = self.search_query.trim().to_owned();
+        if query.is_empty() {
+            self.active_section = "我的".into();
+            self.refresh_items();
+            self.status = None;
+            cx.notify();
+            return;
+        }
+
+        self.active_section = "搜索".into();
+        self.status = Some("正在搜索本地内容…".into());
+        let database_path = self.database_path.clone();
+        let timer = cx.background_executor().timer(SEARCH_DEBOUNCE_DELAY);
+        self.search_task = Some(cx.spawn(async move |view, cx| {
+            timer.await;
+            let query_for_search = query.clone();
+            let search = cx.background_executor().spawn(async move {
+                let workspace =
+                    LocalWorkspace::open(database_path).map_err(|error| error.to_string())?;
+                workspace
+                    .search(&query_for_search, 200)
+                    .map_err(|error| error.to_string())
+            });
+            let result = search.await;
+            let _ = cx.update(|cx| {
+                let Some(view) = view.upgrade() else {
+                    return;
+                };
+                view.update(cx, |this, cx| {
+                    if !this.search_requests.is_current(request)
+                        || this.search_query.trim() != query
+                    {
+                        return;
+                    }
+                    match result {
+                        Ok(items) => {
+                            let count = items.len();
+                            this.explorer.replace_items(items);
+                            this.status = Some(format!("找到 {count} 条本地内容").into());
+                        }
+                        Err(error) => {
+                            this.status = Some(format!("搜索失败：{error}").into());
+                        }
+                    }
+                    cx.notify();
+                });
+            });
+        }));
+        cx.notify();
     }
 
     fn create_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let parent = self.creation_parent();
         match self.service.create_note(parent.as_deref(), "无标题笔记") {
             Ok(node) => {
+                if let Some(parent) = parent {
+                    self.explorer.reveal_folder(parent);
+                }
                 self.show_trash = false;
                 self.refresh_items();
                 self.open_node(node.base().id.clone(), window, cx);
@@ -379,6 +526,10 @@ impl IdeallDesktop {
         let parent = self.creation_parent();
         match self.service.create_folder(parent.as_deref(), "新建文件夹") {
             Ok(node) => {
+                if let Some(parent) = parent {
+                    self.explorer.reveal_folder(parent);
+                }
+                self.explorer.reveal_folder(node.base().id.clone());
                 self.show_trash = false;
                 self.refresh_items();
                 self.open_node(node.base().id.clone(), window, cx);
@@ -396,6 +547,9 @@ impl IdeallDesktop {
             .create_bookmark(parent.as_deref(), "新建书签", "https://example.com/")
         {
             Ok(node) => {
+                if let Some(parent) = parent {
+                    self.explorer.reveal_folder(parent);
+                }
                 self.show_trash = false;
                 self.refresh_items();
                 self.open_node(node.base().id.clone(), window, cx);
@@ -413,6 +567,9 @@ impl IdeallDesktop {
             .create_file(parent.as_deref(), "新建文本.txt", "text/plain", Vec::new())
         {
             Ok(node) => {
+                if let Some(parent) = parent {
+                    self.explorer.reveal_folder(parent);
+                }
                 self.show_trash = false;
                 self.refresh_items();
                 self.open_node(node.base().id.clone(), window, cx);
@@ -478,6 +635,9 @@ impl IdeallDesktop {
                                 }
                             }
                         }
+                        if let Some(parent) = parent {
+                            this.explorer.reveal_folder(parent);
+                        }
                         this.refresh_items();
                         this.status = Some(format!("已导入 {imported} 个文件").into());
                         cx.notify();
@@ -498,9 +658,11 @@ impl IdeallDesktop {
     }
 
     fn creation_parent(&self) -> Option<String> {
-        (self.selected_kind == Some(NodeKind::Folder))
-            .then(|| self.selected_id.clone())
-            .flatten()
+        self.explorer.selected_folder_id().or_else(|| {
+            (self.editor.selected_kind == Some(NodeKind::Folder))
+                .then(|| self.editor.selected_id.clone())
+                .flatten()
+        })
     }
 
     fn load_node_into_editor(
@@ -512,35 +674,35 @@ impl IdeallDesktop {
         match self.service.node(id) {
             Ok(node) => {
                 self.detach_pending_autosave(cx);
-                self.suppress_editor_events = true;
+                let kind = node.kind();
                 let title = node.base().title.clone();
                 let (body, editable, protected_blocks) = self.node_body(&node);
-                self.title_input
-                    .update(cx, |input, cx| input.set_value(title.clone(), window, cx));
-                self.body_input
-                    .update(cx, |input, cx| input.set_value(body.clone(), window, cx));
-                self.code_input.update(cx, |input, cx| {
-                    input.set_highlighter(code_language_for_node(&self.service, id), cx);
-                    input.set_value(body, window, cx);
-                });
-                self.suppress_editor_events = false;
-                self.selected_kind = Some(node.kind());
-                self.selected_id = Some(id.to_owned());
-                self.body_editable = editable;
-                self.dirty = false;
-                self.status = if node.kind() == NodeKind::Note && protected_blocks > 0 {
+                let language = code_language_for_node(&self.service, id);
+                self.editor.load_document(
+                    LoadedDocument {
+                        id: id.to_owned(),
+                        kind,
+                        title: title.clone(),
+                        body,
+                        language,
+                        editable,
+                    },
+                    window,
+                    cx,
+                );
+                self.status = if kind == NodeKind::Note && protected_blocks > 0 {
                     Some(
                         format!(
                             "可编辑常用 Markdown 块；{protected_blocks} 个未知富文本块以指纹占位保护，请勿修改占位行"
                         )
                         .into(),
                     )
-                } else if node.kind() == NodeKind::File && !editable {
+                } else if kind == NodeKind::File && !editable {
                     Some("此二进制类型在 ideall 中只读；可导出临时副本并用系统应用打开".into())
                 } else {
                     None
                 };
-                Some((node.kind(), title))
+                Some((kind, title))
             }
             Err(error) => {
                 self.status = Some(error.to_string().into());
@@ -550,8 +712,15 @@ impl IdeallDesktop {
     }
 
     fn open_node(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dirty && self.selected_id.as_deref() == Some(id.as_str()) {
+        self.explorer.select(id.clone());
+        if self.editor.dirty && self.editor.selected_id.as_deref() == Some(id.as_str()) {
             return;
+        }
+        if self.editor.dirty {
+            self.save(window, cx);
+            if self.editor.dirty {
+                return;
+            }
         }
         if let Some((kind, title)) = self.load_node_into_editor(&id, window, cx)
             && !self.show_trash
@@ -561,12 +730,17 @@ impl IdeallDesktop {
                 .file_metadata(&id)
                 .ok()
                 .and_then(|file| {
-                    resolve_default_engine(&self.engines, &file, &self.engine_preferences)
+                    resolve_default_engine(
+                        &self.editor.engines,
+                        &file,
+                        &self.editor.engine_preferences,
+                    )
                 })
                 .map(|resolution| resolution.candidate.descriptor.engine_id)
                 .unwrap_or_else(|| engine_id(kind).into());
             self.activate_engine(&engine_id, &id, window, cx);
-            self.workspace.open(TabDescriptor {
+            self.editor.restore_active_session(window, cx);
+            self.editor.workspace.open(TabDescriptor {
                 file: FileRef::new("local.nodes", &id),
                 engine_id,
                 title,
@@ -585,8 +759,8 @@ impl IdeallDesktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.active_engine_id = Some(engine_id.to_owned());
-        self.embedded_browser = None;
+        self.editor.active_engine_id = Some(engine_id.to_owned());
+        self.browser.clear();
         if engine_id != "ideall.browser" {
             return;
         }
@@ -594,13 +768,7 @@ impl IdeallDesktop {
             Ok(Node::Bookmark { content, .. }) => content.url,
             _ => return,
         };
-        match create_embedded_browser(&url, window, cx) {
-            Ok(browser) => {
-                self.embedded_browser = Some(browser);
-                self.status = Some("已在隔离的系统 WebView 中打开书签".into());
-            }
-            Err(error) => self.status = Some(error.into()),
-        }
+        self.navigate_browser_to(&url, true, window, cx);
     }
 
     fn node_body(&self, node: &Node) -> (String, bool, usize) {
@@ -636,25 +804,21 @@ impl IdeallDesktop {
     }
 
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.selected_id.clone() else {
+        let Some(draft) = self.editor.draft(cx) else {
             return;
         };
-        self.autosave_task.take();
-        let title = self.title_input.read(cx).value().to_string();
-        let body = if self.active_engine_id.as_deref() == Some("ideall.code") {
-            self.code_input.read(cx).value().to_string()
-        } else {
-            self.body_input.read(cx).value().to_string()
-        };
-        let result =
-            self.service
-                .save_edits(&id, title, self.body_editable.then_some(body.as_str()));
+        self.editor.autosave_task.take();
+        let result = self.service.save_edits(
+            &draft.id,
+            draft.title,
+            draft.body_editable.then_some(draft.body.as_str()),
+        );
         match result {
             Ok(_) => {
+                self.editor.dirty = false;
                 self.refresh_items();
-                self.open_node(id, window, cx);
+                self.open_node(draft.id, window, cx);
                 self.status = Some("已保存到本地 SQLite".into());
-                self.dirty = false;
             }
             Err(error) => self.status = Some(error.to_string().into()),
         }
@@ -662,33 +826,27 @@ impl IdeallDesktop {
     }
 
     fn mark_editor_dirty(&mut self, cx: &mut Context<Self>) {
-        if self.suppress_editor_events || self.selected_id.is_none() || self.show_trash {
+        if self.show_trash || self.editor.mark_dirty().is_none() {
             return;
         }
-        self.dirty = true;
-        self.draft_revision = self.draft_revision.wrapping_add(1);
         self.schedule_draft_save(DRAFT_AUTOSAVE_DELAY, cx);
         cx.notify();
     }
 
     fn schedule_draft_save(&mut self, delay: Duration, cx: &mut Context<Self>) {
-        if !self.dirty {
+        if !self.editor.dirty {
             return;
         }
-        let Some(id) = self.selected_id.clone() else {
+        let Some(draft) = self.editor.draft(cx) else {
             return;
         };
-        let revision = self.draft_revision;
-        let title = self.title_input.read(cx).value().to_string();
-        let body = if self.active_engine_id.as_deref() == Some("ideall.code") {
-            self.code_input.read(cx).value().to_string()
-        } else {
-            self.body_input.read(cx).value().to_string()
-        };
-        let body = self.body_editable.then_some(body);
+        let revision = self.editor.draft_revision;
+        let id = draft.id;
+        let title = draft.title;
+        let body = draft.body_editable.then_some(draft.body);
         let database_path = self.database_path.clone();
         let timer = cx.background_executor().timer(delay);
-        self.autosave_task = Some(cx.spawn(async move |view, cx| {
+        self.editor.autosave_task = Some(cx.spawn(async move |view, cx| {
             timer.await;
             let save_task = cx.background_executor().spawn(async move {
                 let mut workspace =
@@ -704,7 +862,7 @@ impl IdeallDesktop {
                     return;
                 };
                 view.update(cx, |this, cx| {
-                    if this.draft_revision != revision {
+                    if this.editor.draft_revision != revision {
                         if let Err(error) = &result {
                             this.status = Some(format!("上一项草稿自动保存失败：{error}").into());
                             cx.notify();
@@ -713,14 +871,28 @@ impl IdeallDesktop {
                     }
                     match result {
                         Ok((id, summary)) => {
-                            if this.selected_id.as_deref() != Some(id.as_str()) {
+                            if this.editor.selected_id.as_deref() != Some(id.as_str()) {
                                 return;
                             }
-                            if let Some(item) = this.items.iter_mut().find(|item| item.id == id) {
-                                item.title = summary.title;
+                            if let Some(item) =
+                                this.explorer.items.iter_mut().find(|item| item.id == id)
+                            {
+                                item.title = summary.title.clone();
                                 item.updated_at = summary.updated_at;
                             }
-                            this.dirty = false;
+                            for tab in &mut this.editor.workspace.tabs {
+                                if tab.file.file_id == id {
+                                    tab.title = summary.title.clone();
+                                }
+                            }
+                            if this.editor.selected_kind == Some(NodeKind::File) {
+                                let language = code_language_for_node(&this.service, &id);
+                                this.editor
+                                    .code_input
+                                    .update(cx, |input, cx| input.set_highlighter(language, cx));
+                            }
+                            this.persist_workspace();
+                            this.editor.dirty = false;
                             this.status = Some("已自动保存到本地 SQLite".into());
                         }
                         Err(error) => {
@@ -734,11 +906,11 @@ impl IdeallDesktop {
     }
 
     fn detach_pending_autosave(&mut self, cx: &mut Context<Self>) {
-        if self.dirty {
+        if self.editor.dirty {
             self.schedule_draft_save(Duration::ZERO, cx);
         }
-        self.draft_revision = self.draft_revision.wrapping_add(1);
-        if let Some(task) = self.autosave_task.take() {
+        self.editor.draft_revision = self.editor.draft_revision.wrapping_add(1);
+        if let Some(task) = self.editor.autosave_task.take() {
             task.detach();
         }
     }
@@ -791,22 +963,22 @@ impl IdeallDesktop {
     }
 
     fn open_bookmark_external(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.selected_id.clone() else {
+        let Some(id) = self.editor.selected_id.clone() else {
             return;
         };
-        if self.selected_kind != Some(NodeKind::Bookmark) {
+        if self.editor.selected_kind != Some(NodeKind::Bookmark) {
             return;
         }
 
-        if self.dirty {
-            let title = self.title_input.read(cx).value().to_string();
-            let url = self.body_input.read(cx).value().to_string();
+        if self.editor.dirty {
+            let title = self.editor.title_input.read(cx).value().to_string();
+            let url = self.editor.body_input.read(cx).value().to_string();
             if let Err(error) = self.service.save_edits(&id, title, Some(&url)) {
                 self.status = Some(error.to_string().into());
                 cx.notify();
                 return;
             }
-            self.dirty = false;
+            self.editor.dirty = false;
             self.refresh_items();
             self.load_node_into_editor(&id, window, cx);
         }
@@ -830,23 +1002,12 @@ impl IdeallDesktop {
         cx: &mut Context<Self>,
     ) {
         self.clear_selection(window, cx);
-        self.active_engine_id = Some(engine_id.into());
-        match create_embedded_browser(url, window, cx) {
-            Ok(browser) => {
-                self.embedded_browser = Some(browser);
-                self.status =
-                    Some("已在隔离的系统 WebView 中打开；未注入本地文件或密钥能力".into());
-            }
-            Err(error) => {
-                cx.open_url(url);
-                self.status = Some(format!("{error}；已交给系统浏览器").into());
-            }
-        }
-        cx.notify();
+        self.editor.active_engine_id = Some(engine_id.into());
+        self.navigate_browser_to(url, true, window, cx);
     }
 
     fn open_file_with_system(&mut self, cx: &mut Context<Self>) {
-        let Some(id) = self.selected_id.clone() else {
+        let Some(id) = self.editor.selected_id.clone() else {
             return;
         };
         let node = match self.service.node(&id) {
@@ -885,18 +1046,19 @@ impl IdeallDesktop {
     }
 
     fn move_selected_to_trash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dirty {
+        if self.editor.dirty {
             self.save(window, cx);
-            if self.dirty {
+            if self.editor.dirty {
                 return;
             }
         }
-        let Some(id) = self.selected_id.clone() else {
+        let Some(id) = self.editor.selected_id.clone() else {
             return;
         };
         match self.service.move_to_trash(&id) {
             Ok(true) => {
                 let tab_ids = self
+                    .editor
                     .workspace
                     .tabs
                     .iter()
@@ -904,7 +1066,7 @@ impl IdeallDesktop {
                     .map(tab_key)
                     .collect::<Vec<_>>();
                 for tab_id in tab_ids {
-                    self.workspace.close(&tab_id);
+                    self.editor.workspace.close(&tab_id);
                 }
                 self.persist_workspace();
                 self.clear_selection(window, cx);
@@ -917,8 +1079,45 @@ impl IdeallDesktop {
         cx.notify();
     }
 
+    fn move_explorer_selection_to_trash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.explorer.selection_id.clone() else {
+            return;
+        };
+        if self.editor.selected_id.as_deref() == Some(id.as_str()) && self.editor.dirty {
+            self.save(window, cx);
+            if self.editor.dirty {
+                return;
+            }
+        }
+        match self.service.move_to_trash(&id) {
+            Ok(true) => {
+                let tab_ids = self
+                    .editor
+                    .workspace
+                    .tabs
+                    .iter()
+                    .filter(|tab| tab.file.file_id == id)
+                    .map(tab_key)
+                    .collect::<Vec<_>>();
+                for tab_id in tab_ids {
+                    self.editor.workspace.close(&tab_id);
+                }
+                if self.editor.selected_id.as_deref() == Some(id.as_str()) {
+                    self.clear_selection(window, cx);
+                }
+                self.explorer.clear_selection();
+                self.refresh_items();
+                self.persist_workspace();
+                self.status = Some("已移到回收站".into());
+            }
+            Ok(false) => self.status = Some("项目已不在当前列表".into()),
+            Err(error) => self.status = Some(error.to_string().into()),
+        }
+        cx.notify();
+    }
+
     fn restore_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.selected_id.clone() else {
+        let Some(id) = self.editor.selected_id.clone() else {
             return;
         };
         match self.service.restore(&id) {
@@ -934,7 +1133,7 @@ impl IdeallDesktop {
     }
 
     fn purge_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.selected_id.clone() else {
+        let Some(id) = self.editor.selected_id.clone() else {
             return;
         };
         match self.service.purge(&id) {
@@ -970,11 +1169,32 @@ impl IdeallDesktop {
     fn show_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.show_trash = false;
         self.search_query.clear();
+        self.search_requests.invalidate();
+        drop(self.search_task.take());
+        self.suppress_search_events = true;
         self.search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
+        self.suppress_search_events = false;
         self.active_section = "我的".into();
-        self.clear_selection(window, cx);
+        self.explorer.clear_selection();
         self.refresh_items();
+        if self.editor.selected_id.is_none()
+            && let Some(file_id) =
+                self.editor
+                    .workspace
+                    .active_id
+                    .as_deref()
+                    .and_then(|active_id| {
+                        self.editor
+                            .workspace
+                            .tabs
+                            .iter()
+                            .find(|tab| tab_key(tab) == active_id)
+                            .map(|tab| tab.file.file_id.clone())
+                    })
+        {
+            self.open_node(file_id, window, cx);
+        }
         cx.notify();
     }
 
@@ -990,9 +1210,14 @@ impl IdeallDesktop {
         }
         self.show_trash = false;
         self.search_query.clear();
+        self.search_requests.invalidate();
+        drop(self.search_task.take());
+        self.suppress_search_events = true;
         self.search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
+        self.suppress_search_events = false;
         self.active_section = section.into();
+        self.explorer.clear_selection();
         self.clear_selection(window, cx);
         self.refresh_items();
         self.status = match section {
@@ -1614,9 +1839,14 @@ impl IdeallDesktop {
     fn show_trash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.show_trash = true;
         self.search_query.clear();
+        self.search_requests.invalidate();
+        drop(self.search_task.take());
+        self.suppress_search_events = true;
         self.search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
+        self.suppress_search_events = false;
         self.active_section = "回收站".into();
+        self.explorer.clear_selection();
         self.clear_selection(window, cx);
         self.refresh_items();
         cx.notify();
@@ -1624,38 +1854,270 @@ impl IdeallDesktop {
 
     fn clear_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.detach_pending_autosave(cx);
-        self.suppress_editor_events = true;
-        self.selected_id = None;
-        self.selected_kind = None;
-        self.body_editable = false;
-        self.dirty = false;
-        self.title_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.body_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.code_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.suppress_editor_events = false;
-        self.active_engine_id = None;
-        self.embedded_browser = None;
+        self.editor.clear(window, cx);
+        self.browser.clear();
+    }
+
+    fn toggle_folder(&mut self, id: String, cx: &mut Context<Self>) {
+        self.explorer.toggle_folder(id);
+        self.persist_workspace();
+        cx.notify();
+    }
+
+    fn show_editor_find(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.editor.has_selection() {
+            self.status = Some("请先打开一个文件或笔记".into());
+            cx.notify();
+            return;
+        }
+        self.editor.find_visible = true;
+        self.editor.replace_visible = replace;
+        self.editor.find_input.update(cx, |input, cx| {
+            input.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    fn hide_editor_find(&mut self, cx: &mut Context<Self>) {
+        self.editor.find_visible = false;
+        self.editor.replace_visible = false;
+        self.editor.find_cursor = 0;
+        cx.notify();
+    }
+
+    fn find_next_in_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let query = self.editor.find_input.read(cx).value().to_string();
+        if query.is_empty() {
+            self.status = Some("请输入查找内容".into());
+            cx.notify();
+            return;
+        }
+        let text = self.editor.active_text(cx);
+        let start = self.editor.find_cursor.min(text.len());
+        let found = text[start..]
+            .find(&query)
+            .map(|offset| start + offset)
+            .or_else(|| text[..start].find(&query));
+        let Some(offset) = found else {
+            self.status = Some("当前文件中没有匹配项".into());
+            cx.notify();
+            return;
+        };
+        self.editor.find_cursor = offset + query.len();
+        let position = position_for_byte_offset(&text, offset);
+        self.editor.active_input().update(cx, |input, cx| {
+            input.set_cursor_position(position, window, cx)
+        });
+        self.status = Some(format!("第 {} 行找到匹配项", position.line.saturating_add(1)).into());
+        cx.notify();
+    }
+
+    fn replace_all_in_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.editor.body_editable || self.show_trash {
+            self.status = Some("当前内容为只读，不能替换".into());
+            cx.notify();
+            return;
+        }
+        let query = self.editor.find_input.read(cx).value().to_string();
+        if query.is_empty() {
+            self.status = Some("请输入查找内容".into());
+            cx.notify();
+            return;
+        }
+        let replacement = self.editor.replace_input.read(cx).value().to_string();
+        let text = self.editor.active_text(cx);
+        let count = text.match_indices(&query).count();
+        if count == 0 {
+            self.status = Some("当前文件中没有匹配项".into());
+            cx.notify();
+            return;
+        }
+        let replaced = text.replace(&query, &replacement);
+        self.editor.suppress_events = true;
+        if self.editor.active_engine_id.as_deref() == Some("ideall.code") {
+            self.editor
+                .code_input
+                .update(cx, |input, cx| input.set_value(replaced, window, cx));
+        } else {
+            self.editor
+                .body_input
+                .update(cx, |input, cx| input.set_value(replaced, window, cx));
+        }
+        self.editor.suppress_events = false;
+        self.editor.find_cursor = 0;
+        self.mark_editor_dirty(cx);
+        self.status = Some(format!("已替换 {count} 处，等待自动保存").into());
+        cx.notify();
+    }
+
+    fn expand_all_folders(&mut self, cx: &mut Context<Self>) {
+        self.explorer.expand_all();
+        self.persist_workspace();
+        cx.notify();
+    }
+
+    fn collapse_all_folders(&mut self, cx: &mut Context<Self>) {
+        self.explorer.collapse_all();
+        self.persist_workspace();
+        cx.notify();
+    }
+
+    fn toggle_project_panel(&mut self, cx: &mut Context<Self>) {
+        self.explorer.toggle_panel();
+        self.persist_workspace();
+        cx.notify();
+    }
+
+    fn begin_explorer_rename(
+        &mut self,
+        id: String,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.explorer.begin_rename(id, title, window, cx);
+    }
+
+    fn begin_selected_explorer_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(selected_id) = self.explorer.selection_id.clone() else {
+            return;
+        };
+        let Some(item) = self
+            .explorer
+            .items
+            .iter()
+            .find(|item| item.id == selected_id)
+        else {
+            return;
+        };
+        self.begin_explorer_rename(item.id.clone(), item.title.clone(), window, cx);
+    }
+
+    fn open_selected_explorer_node(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(selected_id) = self.explorer.selection_id.clone() else {
+            return;
+        };
+        let is_folder = self
+            .explorer
+            .items
+            .iter()
+            .find(|item| item.id == selected_id)
+            .is_some_and(|item| item.kind == NodeKind::Folder);
+        if is_folder {
+            self.toggle_folder(selected_id, cx);
+        } else {
+            self.open_node(selected_id, window, cx);
+        }
+    }
+
+    fn select_relative_explorer_node(&mut self, offset: isize, cx: &mut Context<Self>) {
+        let preserve_full_list = self.active_section.as_ref() != "我的";
+        if self.explorer.select_relative(preserve_full_list, offset) {
+            cx.notify();
+        }
+    }
+
+    fn cancel_explorer_rename(&mut self, cx: &mut Context<Self>) {
+        self.explorer.cancel_rename();
+        cx.notify();
+    }
+
+    fn commit_explorer_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.explorer.renaming_id.clone() else {
+            return;
+        };
+        let Some(rename_input) = self.explorer.rename_input.clone() else {
+            return;
+        };
+        let title = rename_input.read(cx).value().trim().to_owned();
+        match self.service.rename(&id, title.clone()) {
+            Ok(_) => {
+                self.explorer.cancel_rename();
+                if self.editor.selected_id.as_deref() == Some(id.as_str()) {
+                    self.editor.suppress_events = true;
+                    self.editor
+                        .title_input
+                        .update(cx, |input, cx| input.set_value(title.clone(), window, cx));
+                    self.editor.suppress_events = false;
+                    if self.editor.selected_kind == Some(NodeKind::File) {
+                        let language = code_language_for_node(&self.service, &id);
+                        self.editor
+                            .code_input
+                            .update(cx, |input, cx| input.set_highlighter(language, cx));
+                    }
+                }
+                for tab in &mut self.editor.workspace.tabs {
+                    if tab.file.file_id == id {
+                        tab.title = title.clone();
+                    }
+                }
+                self.refresh_items();
+                self.persist_workspace();
+                self.status = Some("名称已更新".into());
+            }
+            Err(error) => self.status = Some(error.to_string().into()),
+        }
+        cx.notify();
+    }
+
+    fn move_explorer_node(
+        &mut self,
+        id: String,
+        parent_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        match self.service.move_node(&id, parent_id.as_deref()) {
+            Ok(_) => {
+                if let Some(parent_id) = parent_id {
+                    self.explorer.reveal_folder(parent_id);
+                }
+                self.refresh_items();
+                self.persist_workspace();
+                self.status = Some("项目已移动".into());
+            }
+            Err(error) => self.status = Some(error.to_string().into()),
+        }
+        cx.notify();
     }
 
     fn activate_tab(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
-        if self.workspace.activate(&id)
-            && let Some(tab) = self.workspace.tabs.iter().find(|tab| tab_key(tab) == id)
-        {
-            self.open_node(tab.file.file_id.clone(), window, cx);
+        if let Some(file_id) = self.editor.activate_tab(&id) {
+            self.open_node(file_id, window, cx);
         }
         self.persist_workspace();
     }
 
     fn close_tab(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.workspace.close(&id) {
+        if self.editor.dirty && self.editor.workspace.active_id.as_deref() == Some(id.as_str()) {
+            self.save(window, cx);
+            if self.editor.dirty {
+                return;
+            }
+        }
+        let closed_file_id = self
+            .editor
+            .workspace
+            .tabs
+            .iter()
+            .find(|tab| tab_key(tab) == id)
+            .map(|tab| tab.file.file_id.clone());
+        if !self.editor.workspace.close(&id) {
             return;
         }
+        if let Some(file_id) = closed_file_id
+            && !self
+                .editor
+                .workspace
+                .tabs
+                .iter()
+                .any(|tab| tab.file.file_id == file_id)
+        {
+            self.editor.remove_session(&file_id);
+        }
         self.persist_workspace();
-        if let Some(active_id) = self.workspace.active_id.clone()
+        if let Some(active_id) = self.editor.workspace.active_id.clone()
             && let Some(tab) = self
+                .editor
                 .workspace
                 .tabs
                 .iter()
@@ -1669,7 +2131,8 @@ impl IdeallDesktop {
     }
 
     fn persist_workspace(&mut self) {
-        if let Err(error) = self.service.save_workspace_state(&self.workspace) {
+        self.editor.workspace.explorer = self.explorer.layout_state();
+        if let Err(error) = self.service.save_workspace_state(&self.editor.workspace) {
             self.status = Some(error.to_string().into());
         }
     }
@@ -1680,17 +2143,17 @@ impl IdeallDesktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.dirty {
+        if self.editor.dirty {
             self.save(window, cx);
-            if self.dirty {
+            if self.editor.dirty {
                 return;
             }
         }
-        let Some(id) = self.selected_id.clone() else {
+        let Some(id) = self.editor.selected_id.clone() else {
             return;
         };
         let result = self.service.file_metadata(&id).and_then(|file| {
-            let supported = list_matching_engines(&self.engines, &file)
+            let supported = list_matching_engines(&self.editor.engines, &file)
                 .iter()
                 .any(|candidate| candidate.descriptor.engine_id == engine_id);
             if !supported {
@@ -1702,11 +2165,12 @@ impl IdeallDesktop {
             let key = file.r#ref.to_key().map_err(|error| {
                 ideall_application::ApplicationError::InvalidFileRef(error.to_string())
             })?;
-            self.engine_preferences
+            self.editor
+                .engine_preferences
                 .files
                 .insert(key, engine_id.to_owned());
             self.service
-                .save_engine_preferences(&self.engine_preferences)
+                .save_engine_preferences(&self.editor.engine_preferences)
         });
         match result {
             Ok(()) => {
@@ -1719,1115 +2183,6 @@ impl IdeallDesktop {
     }
 }
 
-impl Render for IdeallDesktop {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let sections = ["我的", "活动", "浏览", "应用", "设置"];
-        let selected_id = self.selected_id.clone();
-        let items = self.items.clone();
-        let tabs = self.workspace.tabs.clone();
-        let active_tab = self.workspace.active_id.clone();
-        let has_selection = self.selected_id.is_some();
-        let show_settings = !has_selection && self.active_section.as_ref() == "设置";
-        let show_apps = !has_selection && self.active_section.as_ref() == "应用";
-        let show_browse = self.active_section.as_ref() == "浏览";
-        let can_create = !self.show_trash && self.active_section.as_ref() == "我的";
-        let engine_capabilities = engine_runtime_capabilities(EnginePlatform::current_desktop());
-        let agent_audits = self.agent_audits.clone();
-        let agent_threads = self.agent_threads.clone();
-        let agent_transcript = self.agent_transcript.clone();
-        let available_update = self.available_update.clone();
-        let empty_message: SharedString = match self.active_section.as_ref() {
-            "搜索" => "没有匹配的本地内容".into(),
-            "回收站" => "回收站为空".into(),
-            "活动" => "还没有本地活动".into(),
-            "浏览" => "还没有书签或关注源".into(),
-            "应用" => format!("已声明 {} 项平台 Engine 能力", engine_capabilities.len()).into(),
-            "设置" => "本地设置已就绪；文件 Engine 偏好会自动持久化".into(),
-            _ => "点击“+ 笔记”开始".into(),
-        };
-        let is_body_editable = matches!(
-            self.selected_kind,
-            Some(NodeKind::Note | NodeKind::Bookmark | NodeKind::File)
-        );
-        let show_code = self.active_engine_id.as_deref() == Some("ideall.code")
-            && self.selected_kind == Some(NodeKind::File);
-        let show_preview = self.active_engine_id.as_deref() == Some("ideall.preview")
-            && self.selected_kind == Some(NodeKind::File);
-        let embedded_browser = self.embedded_browser.clone();
-        let show_browser = embedded_browser.is_some()
-            && self.active_engine_id.as_deref() == Some("ideall.browser");
-        let show_remote_webview = !has_selection
-            && embedded_browser.is_some()
-            && matches!(
-                self.active_engine_id.as_deref(),
-                Some("ideall.info" | "ideall.community")
-            );
-        let remote_browser = embedded_browser.clone();
-        let delegated_capability = self.active_engine_id.as_deref().and_then(|engine_id| {
-            engine_capabilities.iter().copied().find(|capability| {
-                capability.engine_id == engine_id
-                    && matches!(
-                        capability.kind,
-                        EngineRuntimeKind::SystemExternal | EngineRuntimeKind::MetadataOnly
-                    )
-            })
-        });
-        let show_delegated_engine = has_selection && delegated_capability.is_some();
-        let preview_text = self.body_input.read(cx).value();
-        let preview = TextView::markdown("active-file-preview", preview_text, window, cx)
-            .selectable(true)
-            .scrollable(true);
-
-        div()
-            .id("ideall-root")
-            .flex()
-            .size_full()
-            .bg(rgb(0xf5f7fa))
-            .text_color(rgb(0x1f2937))
-            .child(
-                div()
-                    .w(px(64.0))
-                    .h_full()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap_2()
-                    .py_3()
-                    .border_r_1()
-                    .border_color(rgb(0xdde3ea))
-                    .bg(rgb(0xffffff))
-                    .children(sections.map(|section| {
-                        let selected = self.active_section.as_ref() == section;
-                        div()
-                            .id(SharedString::from(format!("section-{section}")))
-                            .w(px(48.0))
-                            .h(px(40.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded_lg()
-                            .cursor_pointer()
-                            .when(selected, |item| item.bg(rgb(0xe8eef8)))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.select_section(section, window, cx);
-                            }))
-                            .child(section)
-                    })),
-            )
-            .child(
-                div()
-                    .w(px(252.0))
-                    .h_full()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .p_3()
-                    .border_r_1()
-                    .border_color(rgb(0xdde3ea))
-                    .bg(rgb(0xf9fafb))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().text_lg().child(self.active_section.clone()))
-                            .child(
-                                Button::new("new-note")
-                                    .label("+ 笔记")
-                                    .small()
-                                    .disabled(!can_create)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.create_note(window, cx);
-                                    })),
-                            ),
-                    )
-                    .child(Input::new(&self.search_input).w_full())
-                    .when(show_browse, |sidebar| {
-                        sidebar.child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap_2()
-                                .child(Input::new(&self.feed_key_input).w_full())
-                                .child(
-                                    Button::new("new-feed")
-                                        .label("+ 关注发布者")
-                                        .small()
-                                        .primary()
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.create_feed(window, cx);
-                                        })),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .gap_2()
-                                .child(
-                                    Button::new("open-info-portal")
-                                        .label("资讯")
-                                        .small()
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.open_portal(
-                                                "ideall.info",
-                                                INFO_PORTAL_URL,
-                                                window,
-                                                cx,
-                                            );
-                                        })),
-                                )
-                                .child(
-                                    Button::new("open-community-portal")
-                                        .label("社区")
-                                        .small()
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.open_portal(
-                                                "ideall.community",
-                                                COMMUNITY_PORTAL_URL,
-                                                window,
-                                                cx,
-                                            );
-                                        })),
-                                ),
-                        )
-                    })
-                    .child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .child(
-                                Button::new("home-list")
-                                    .label("全部")
-                                    .small()
-                                    .selected(!self.show_trash)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.show_files(window, cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new("trash-list")
-                                    .label("回收站")
-                                    .small()
-                                    .selected(self.show_trash)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.show_trash(window, cx);
-                                    })),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_wrap()
-                            .gap_1()
-                            .child(
-                                Button::new("new-bookmark")
-                                    .label("+ 书签")
-                                    .small()
-                                    .ghost()
-                                    .disabled(!can_create)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.create_bookmark(window, cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new("new-folder")
-                                    .label("+ 文件夹")
-                                    .small()
-                                    .ghost()
-                                    .disabled(!can_create)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.create_folder(window, cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new("new-file")
-                                    .label("+ 空文件")
-                                    .small()
-                                    .ghost()
-                                    .disabled(!can_create)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.create_text_file(window, cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new("import-file")
-                                    .label("导入")
-                                    .small()
-                                    .ghost()
-                                    .disabled(!can_create)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.import_files(cx);
-                                    })),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .overflow_hidden()
-                            .when(items.is_empty(), |list| {
-                                list.child(
-                                    div()
-                                        .p_3()
-                                        .text_sm()
-                                        .text_color(rgb(0x6b7280))
-                                        .child(empty_message),
-                                )
-                            })
-                            .children(items.into_iter().map(|item| {
-                                let id = item.id.clone();
-                                let selected = selected_id.as_deref() == Some(id.as_str());
-                                div()
-                                    .id(SharedString::from(format!("node-{id}")))
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .px_2()
-                                    .pl(px(8.0 + item.depth as f32 * 14.0))
-                                    .py_2()
-                                    .rounded_md()
-                                    .cursor_pointer()
-                                    .when(selected, |row| row.bg(rgb(0xe8eef8)))
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.open_node(id.clone(), window, cx);
-                                    }))
-                                    .child(div().text_sm().child(kind_icon(item.kind)))
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .child(item.title),
-                                    )
-                            })),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        Button::new("engine-code")
-                            .label("开发视图")
-                            .small()
-                            .ghost()
-                            .disabled(self.selected_kind != Some(NodeKind::File))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.set_engine_preference("ideall.code", window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("engine-preview")
-                            .label("通用预览")
-                            .small()
-                            .ghost()
-                            .disabled(self.selected_kind != Some(NodeKind::File))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.set_engine_preference("ideall.preview", window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("engine-browser")
-                            .label("浏览器视图")
-                            .small()
-                            .ghost()
-                            .disabled(self.selected_kind != Some(NodeKind::Bookmark))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.set_engine_preference("ideall.browser", window, cx);
-                            })),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .h_full()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .h(px(48.0))
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .px_2()
-                            .border_b_1()
-                            .border_color(rgb(0xdde3ea))
-                            .bg(rgb(0xffffff))
-                            .children(tabs.into_iter().map(|tab| {
-                                let id = tab_key(&tab);
-                                let close_id = id.clone();
-                                let selected = active_tab.as_deref() == Some(id.as_str());
-                                div()
-                                    .id(SharedString::from(format!("tab-{id}")))
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .px_3()
-                                    .py_2()
-                                    .rounded_md()
-                                    .cursor_pointer()
-                                    .when(selected, |item| item.bg(rgb(0xe9edf3)))
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.activate_tab(id.clone(), window, cx);
-                                    }))
-                                    .child(tab.title)
-                                    .child(
-                                        Button::new(SharedString::from(format!(
-                                            "close-{close_id}"
-                                        )))
-                                        .label("×")
-                                        .small()
-                                        .ghost()
-                                        .on_click(
-                                            cx.listener(move |this, _, window, cx| {
-                                                this.close_tab(close_id.clone(), window, cx);
-                                            }),
-                                        ),
-                                    )
-                            })),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_h_0()
-                            .flex()
-                            .flex_col()
-                            .p_5()
-                            .gap_3()
-                            .when(
-                                !has_selection
-                                    && !show_settings
-                                    && !show_apps
-                                    && !show_remote_webview,
-                                |content| {
-                                content.items_center().justify_center().child(
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .items_center()
-                                        .gap_2()
-                                        .child(div().text_xl().child("ideall 原生工作区"))
-                                        .child(
-                                            div()
-                                                .text_sm()
-                                                .text_color(rgb(0x6b7280))
-                                                .child("Rust · GPUI · SQLite · 本地优先"),
-                                        ),
-                                )
-                            },
-                            )
-                            .when(show_remote_webview, |content| {
-                                content.child(
-                                    remote_browser
-                                        .clone()
-                                        .expect("remote WebView is present when rendered"),
-                                )
-                            })
-                            .when(show_apps, |content| {
-                                content.child(
-                                    div()
-                                        .w_full()
-                                        .max_w(px(820.0))
-                                        .h_full()
-                                        .flex()
-                                        .flex_col()
-                                        .gap_3()
-                                        .overflow_y_scrollbar()
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .items_center()
-                                                .justify_between()
-                                                .child(
-                                                    div()
-                                                        .flex()
-                                                        .flex_col()
-                                                        .gap_1()
-                                                        .child(
-                                                            div()
-                                                                .text_xl()
-                                                                .child("Agent 与原生 Engine"),
-                                                        )
-                                                        .child(
-                                                            div()
-                                                                .text_sm()
-                                                                .text_color(rgb(0x6b7280))
-                                                                .child("BYOK 由本机直连模型；默认工具可读取节点元数据并创建笔记，但不能读取既有笔记正文或 Blob。"),
-                                                        ),
-                                                )
-                                                .child(
-                                                    Button::new("agent-new-thread")
-                                                        .label("新对话")
-                                                        .disabled(self.agent_in_progress)
-                                                        .on_click(cx.listener(|this, _, _, cx| {
-                                                            this.new_agent_thread(cx);
-                                                        })),
-                                                ),
-                                        )
-                                        .child(div().text_lg().child("模型连接（OpenAI-compatible）"))
-                                        .child(div().text_sm().child("API 基址"))
-                                        .child(Input::new(&self.agent_base_url_input).w_full())
-                                        .child(div().text_sm().child("模型名称"))
-                                        .child(Input::new(&self.agent_model_input).w_full())
-                                        .child(div().text_sm().child(format!(
-                                            "API Key：{}",
-                                            if self.agent_key_configured {
-                                                "已安全配置"
-                                            } else {
-                                                "未配置"
-                                            }
-                                        )))
-                                        .child(Input::new(&self.agent_key_input).w_full())
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .gap_2()
-                                                .child(
-                                                    Button::new("agent-save-settings")
-                                                        .label("安全保存")
-                                                        .on_click(cx.listener(
-                                                            |this, _, window, cx| {
-                                                                this.save_agent_model_settings(
-                                                                    window, cx,
-                                                                );
-                                                            },
-                                                        )),
-                                                )
-                                                .child(
-                                                    Button::new("agent-clear-key")
-                                                        .label("清除 Key")
-                                                        .danger()
-                                                        .on_click(cx.listener(|this, _, _, cx| {
-                                                            this.clear_agent_credential(cx);
-                                                        })),
-                                                )
-                                                .child(
-                                                    Button::new("agent-create-draft")
-                                                        .label("MCP 冒烟：创建草稿")
-                                                        .on_click(cx.listener(|this, _, _, cx| {
-                                                            this.create_agent_draft(cx);
-                                                        })),
-                                                ),
-                                        )
-                                        .child(div().text_lg().child("外部 ACP Agent（仅桌面）"))
-                                        .child(
-                                            div()
-                                                .text_sm()
-                                                .text_color(rgb(0x9f2f28))
-                                                .child("只运行你在本机明确配置的程序。ACP 权限请求默认拒绝，但外部进程仍拥有当前系统账户与所选工作目录本身允许的访问权。"),
-                                        )
-                                        .child(div().text_sm().child("程序"))
-                                        .child(Input::new(&self.acp_program_input).w_full())
-                                        .child(div().text_sm().child("参数（argv 引号规则）"))
-                                        .child(Input::new(&self.acp_args_input).w_full())
-                                        .child(div().text_sm().child("工作目录（绝对路径）"))
-                                        .child(Input::new(&self.acp_cwd_input).w_full())
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .gap_2()
-                                                .child(
-                                                    Button::new("acp-save-settings")
-                                                        .label("保存 ACP 设置")
-                                                        .on_click(cx.listener(
-                                                            |this, _, window, cx| {
-                                                                this.save_external_acp_settings(
-                                                                    window, cx,
-                                                                );
-                                                            },
-                                                        )),
-                                                )
-                                                .child(
-                                                    Button::new("acp-send")
-                                                        .label(if self.agent_in_progress {
-                                                            "Agent 处理中……"
-                                                        } else {
-                                                            "用外部 ACP 发送下方消息"
-                                                        })
-                                                        .disabled(self.agent_in_progress)
-                                                        .on_click(cx.listener(
-                                                            |this, _, window, cx| {
-                                                                this.start_external_acp_turn(
-                                                                    window, cx,
-                                                                );
-                                                            },
-                                                        )),
-                                                ),
-                                        )
-                                        .child(div().text_lg().child("本地对话"))
-                                        .when(agent_threads.is_empty(), |threads| {
-                                            threads.child(
-                                                div()
-                                                    .text_sm()
-                                                    .text_color(rgb(0x6b7280))
-                                                    .child("尚无 Agent 对话"),
-                                            )
-                                        })
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .flex_wrap()
-                                                .gap_2()
-                                                .children(agent_threads.into_iter().map(|thread| {
-                                                    let id = thread.id.clone();
-                                                    Button::new(SharedString::from(format!(
-                                                        "agent-thread-{}",
-                                                        thread.id
-                                                    )))
-                                                    .label(thread.title)
-                                                    .small()
-                                                    .selected(
-                                                        self.agent_thread_id.as_deref()
-                                                            == Some(thread.id.as_str()),
-                                                    )
-                                                    .disabled(self.agent_in_progress)
-                                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                                        this.select_agent_thread(id.clone(), cx);
-                                                    }))
-                                                })),
-                                        )
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .flex_col()
-                                                .gap_2()
-                                                .when(agent_transcript.is_empty(), |messages| {
-                                                    messages.child(
-                                                        div()
-                                                            .p_3()
-                                                            .rounded_lg()
-                                                            .bg(rgb(0xffffff))
-                                                            .text_color(rgb(0x6b7280))
-                                                            .child("输入消息开始对话"),
-                                                    )
-                                                })
-                                                .children(agent_transcript.into_iter().map(
-                                                    |message| {
-                                                        div()
-                                                            .p_3()
-                                                            .rounded_lg()
-                                                            .border_1()
-                                                            .border_color(rgb(0xdde3ea))
-                                                            .bg(rgb(match message.role {
-                                                                ModelRole::User => 0xe8eef8,
-                                                                ModelRole::Assistant => 0xffffff,
-                                                                ModelRole::Tool => 0xf3f4f6,
-                                                                ModelRole::System => 0xfffbeb,
-                                                            }))
-                                                            .child(
-                                                                div()
-                                                                    .text_sm()
-                                                                    .text_color(rgb(0x6b7280))
-                                                                    .child(agent_role_label(
-                                                                        message.role,
-                                                                    )),
-                                                            )
-                                                            .child(message.content)
-                                                    },
-                                                )),
-                                        )
-                                        .child(Input::new(&self.agent_prompt_input).w_full())
-                                        .child(
-                                            Button::new("agent-send")
-                                                .label(if self.agent_in_progress {
-                                                    "Agent 处理中……"
-                                                } else {
-                                                    "发送给 Agent"
-                                                })
-                                                .primary()
-                                                .disabled(self.agent_in_progress)
-                                                .on_click(cx.listener(|this, _, window, cx| {
-                                                    this.start_agent_turn(window, cx);
-                                                })),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_sm()
-                                                .text_color(rgb(0x6b7280))
-                                                .child(
-                                                    self.status
-                                                        .clone()
-                                                        .unwrap_or_else(|| "Agent 就绪".into()),
-                                                ),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_lg()
-                                                .child(format!(
-                                                    "平台 Engine 能力（{}）",
-                                                    engine_capabilities.len()
-                                                )),
-                                        )
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .flex_wrap()
-                                                .gap_2()
-                                                .children(engine_capabilities.into_iter().map(
-                                                    |capability| {
-                                                    div()
-                                                        .w(px(250.0))
-                                                        .flex()
-                                                        .flex_col()
-                                                        .gap_1()
-                                                        .px_3()
-                                                        .py_2()
-                                                        .rounded_lg()
-                                                        .border_1()
-                                                        .border_color(rgb(0xdde3ea))
-                                                        .bg(rgb(0xffffff))
-                                                        .child(
-                                                            div()
-                                                                .flex()
-                                                                .justify_between()
-                                                                .child(format!(
-                                                                    "{} · {}",
-                                                                    capability.label,
-                                                                    capability.engine_id
-                                                                ))
-                                                                .child(
-                                                                    div()
-                                                                        .text_sm()
-                                                                        .text_color(rgb(
-                                                                            if capability
-                                                                                .kind
-                                                                                .is_available()
-                                                                            {
-                                                                                0x315f9f
-                                                                            } else {
-                                                                                0x9f2f28
-                                                                            },
-                                                                        ))
-                                                                        .child(format!(
-                                                                            "{} / {}",
-                                                                            capability.kind.label(),
-                                                                            engine_access_label(
-                                                                                capability.access
-                                                                            )
-                                                                        )),
-                                                                ),
-                                                        )
-                                                        .child(capability.detail)
-                                                },
-                                                )),
-                                        )
-                                        .child(div().text_lg().child("最近写操作审计"))
-                                        .when(agent_audits.is_empty(), |audits| {
-                                            audits.child(
-                                                div()
-                                                    .p_3()
-                                                    .rounded_lg()
-                                                    .bg(rgb(0xffffff))
-                                                    .text_color(rgb(0x6b7280))
-                                                    .child("尚无 Agent 写操作"),
-                                            )
-                                        })
-                                        .children(agent_audits.into_iter().map(|audit| {
-                                            div()
-                                                .flex()
-                                                .flex_col()
-                                                .gap_1()
-                                                .p_3()
-                                                .rounded_lg()
-                                                .border_1()
-                                                .border_color(rgb(0xdde3ea))
-                                                .bg(rgb(0xffffff))
-                                                .child(
-                                                    div()
-                                                        .flex()
-                                                        .justify_between()
-                                                        .child(audit.title)
-                                                        .child(audit_status_label(audit.status)),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .text_sm()
-                                                        .text_color(rgb(0x6b7280))
-                                                        .child(format!(
-                                                            "{} · {}",
-                                                            audit.operation, audit.summary
-                                                        )),
-                                                )
-                                        })),
-                                )
-                            })
-                            .when(show_settings, |content| {
-                                content.child(
-                                    div()
-                                        .w_full()
-                                        .max_w(px(720.0))
-                                        .h_full()
-                                        .flex()
-                                        .flex_col()
-                                        .gap_3()
-                                        .overflow_y_scrollbar()
-                                        .child(div().text_xl().child("端到端加密同步"))
-                                        .child(
-                                            div()
-                                                .text_sm()
-                                                .text_color(rgb(0x6b7280))
-                                                .child("服务端只保存 AES-GCM 密文；同步码与登录 Token 保存在系统安全存储。"),
-                                        )
-                                        .child(div().text_sm().child("服务端基址"))
-                                        .child(Input::new(&self.sync_server_input).w_full())
-                                        .child(
-                                            div().text_sm().child(format!(
-                                                "同步码：{}",
-                                                if self.sync_code_configured {
-                                                    "已配置"
-                                                } else {
-                                                    "未配置"
-                                                }
-                                            )),
-                                        )
-                                        .child(Input::new(&self.sync_code_input).w_full())
-                                        .child(
-                                            div().text_sm().child(format!(
-                                                "登录 Token：{}",
-                                                if self.sync_token_configured {
-                                                    "已配置"
-                                                } else {
-                                                    "未配置"
-                                                }
-                                            )),
-                                        )
-                                        .child(Input::new(&self.sync_token_input).w_full())
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .gap_2()
-                                                .child(
-                                                    Button::new("save-sync-settings")
-                                                        .label("安全保存")
-                                                        .on_click(cx.listener(
-                                                            |this, _, window, cx| {
-                                                                this.save_sync_settings(window, cx);
-                                                            },
-                                                        )),
-                                                )
-                                                .child(
-                                                    Button::new("sync-notes-now")
-                                                        .label(if self.sync_in_progress {
-                                                            "同步中……"
-                                                        } else {
-                                                            "立即同步全部"
-                                                        })
-                                                        .primary()
-                                                        .disabled(self.sync_in_progress)
-                                                        .on_click(cx.listener(
-                                                            |this, _, window, cx| {
-                                                                this.start_notes_sync(window, cx);
-                                                            },
-                                                        )),
-                                                )
-                                                .child(
-                                                    Button::new("clear-sync-secrets")
-                                                        .label("清除凭据")
-                                                        .danger()
-                                                        .on_click(cx.listener(
-                                                            |this, _, _, cx| {
-                                                                this.clear_sync_credentials(cx);
-                                                            },
-                                                        )),
-                                                ),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_sm()
-                                                .text_color(rgb(0x6b7280))
-                                                .child(
-                                                    self.status
-                                                        .clone()
-                                                        .unwrap_or_else(|| "尚未同步".into()),
-                                                ),
-                                        )
-                                        .child(div().text_xl().child("原生版本与更新"))
-                                        .child(
-                                            div()
-                                                .text_sm()
-                                                .text_color(rgb(0x6b7280))
-                                                .child(format!(
-                                                    "当前版本 {}；只接受 ideall 官方 minisign 根签名的清单，安装器下载后还会校验大小与 SHA-256。",
-                                                    env!("CARGO_PKG_VERSION")
-                                                )),
-                                        )
-                                        .child(
-                                            Button::new("check-native-update")
-                                                .label(if self.update_in_progress {
-                                                    "更新处理中……"
-                                                } else {
-                                                    "检查签名更新"
-                                                })
-                                                .disabled(self.update_in_progress)
-                                                .on_click(cx.listener(|this, _, _, cx| {
-                                                    this.start_update_check(cx);
-                                                })),
-                                        )
-                                        .when(available_update.is_some(), |updates| {
-                                            let update = available_update
-                                                .as_ref()
-                                                .expect("available update was checked")
-                                                .clone();
-                                            let notes = update
-                                                .notes
-                                                .chars()
-                                                .take(600)
-                                                .collect::<String>();
-                                            updates
-                                                .child(
-                                                    div()
-                                                        .p_3()
-                                                        .rounded_lg()
-                                                        .border_1()
-                                                        .border_color(rgb(0xdde3ea))
-                                                        .bg(rgb(0xffffff))
-                                                        .child(format!(
-                                                            "可用版本 {} · {}\n{}",
-                                                            update.version,
-                                                            update.artifact.kind,
-                                                            notes
-                                                        )),
-                                                )
-                                                .child(
-                                                    Button::new("download-native-update")
-                                                        .label(format!(
-                                                            "下载、校验并打开 {} 安装器",
-                                                            update.version
-                                                        ))
-                                                        .primary()
-                                                        .disabled(self.update_in_progress)
-                                                        .on_click(cx.listener(
-                                                            |this, _, _, cx| {
-                                                                this.start_update_download(cx);
-                                                            },
-                                                        )),
-                                                )
-                                        })
-                                        .child(
-                                            div()
-                                                .text_sm()
-                                                .text_color(rgb(0x6b7280))
-                                                .child(
-                                                    self.update_status
-                                                        .clone()
-                                                        .unwrap_or_else(|| {
-                                                            "尚未检查原生 Preview 更新".into()
-                                                        }),
-                                                ),
-                                        ),
-                                )
-                            })
-                            .when(has_selection, |content| {
-                                content
-                                    .child(Input::new(&self.title_input).w_full())
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_h_0()
-                                            .flex()
-                                            .flex_col()
-                                            .when(show_browser, |body| {
-                                                body.child(embedded_browser.clone().unwrap())
-                                            })
-                                            .when(show_code, |body| {
-                                                body.child(
-                                                    Input::new(&self.code_input)
-                                                        .h_full()
-                                                        .disabled(!self.body_editable),
-                                                )
-                                            })
-                                            .when(show_preview, |body| {
-                                                body.child(
-                                                    div()
-                                                        .flex_1()
-                                                        .min_h_0()
-                                                        .p_3()
-                                                        .border_1()
-                                                        .border_color(rgb(0xdde3ea))
-                                                        .rounded_md()
-                                                        .child(preview),
-                                                )
-                                                .child(
-                                                    Input::new(&self.body_input)
-                                                        .h(px(220.0))
-                                                        .disabled(!self.body_editable),
-                                                )
-                                            })
-                                            .when(show_delegated_engine, |body| {
-                                                let capability = delegated_capability
-                                                    .expect("delegated capability is present");
-                                                body.child(
-                                                    div()
-                                                        .flex_1()
-                                                        .min_h_0()
-                                                        .flex()
-                                                        .flex_col()
-                                                        .items_center()
-                                                        .justify_center()
-                                                        .gap_3()
-                                                        .p_5()
-                                                        .border_1()
-                                                        .border_color(rgb(0xdde3ea))
-                                                        .rounded_md()
-                                                        .child(
-                                                            div()
-                                                                .text_xl()
-                                                                .child(format!(
-                                                                    "{} · {}",
-                                                                    capability.label,
-                                                                    capability.kind.label()
-                                                                )),
-                                                        )
-                                                        .child(
-                                                            div()
-                                                                .text_color(rgb(0x6b7280))
-                                                                .child(capability.detail),
-                                                        )
-                                                        .child(
-                                                            Button::new("open-delegated-file")
-                                                                .label("用系统应用打开只读副本")
-                                                                .primary()
-                                                                .on_click(cx.listener(
-                                                                    |this, _, _, cx| {
-                                                                        this.open_file_with_system(cx);
-                                                                    },
-                                                                )),
-                                                        ),
-                                                )
-                                            })
-                                            .when(
-                                                !show_browser
-                                                    && !show_code
-                                                    && !show_preview
-                                                    && !show_delegated_engine,
-                                                |body| {
-                                                body.child(
-                                                    Input::new(&self.body_input)
-                                                        .h_full()
-                                                        .disabled(
-                                                            !is_body_editable
-                                                                || !self.body_editable,
-                                                        ),
-                                                )
-                                            },
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .justify_between()
-                                            .child(
-                                                div().text_sm().text_color(rgb(0x6b7280)).child(
-                                                    self.status
-                                                        .clone()
-                                                        .unwrap_or_else(|| "本地数据".into()),
-                                                ),
-                                            )
-                                            .child(
-                                                div()
-                                                    .flex()
-                                                    .gap_2()
-                                                    .child(
-                                                        Button::new("save")
-                                                            .label(if self.dirty {
-                                                                "保存更改"
-                                                            } else {
-                                                                "已保存"
-                                                            })
-                                                            .primary()
-                                                            .disabled(!self.dirty)
-                                                            .on_click(cx.listener(
-                                                                |this, _, window, cx| {
-                                                                    this.save(window, cx);
-                                                                },
-                                                            )),
-                                                    )
-                                                    .when(
-                                                        !self.show_trash
-                                                            && self.selected_kind
-                                                                == Some(NodeKind::Bookmark),
-                                                        |actions| {
-                                                            actions.child(
-                                                                Button::new("open-bookmark")
-                                                                    .label("系统浏览器打开")
-                                                                    .on_click(cx.listener(
-                                                                        |this, _, window, cx| {
-                                                                            this.open_bookmark_external(
-                                                                                window, cx,
-                                                                            );
-                                                                        },
-                                                                    )),
-                                                            )
-                                                        },
-                                                    )
-                                                    .when(
-                                                        !self.show_trash
-                                                            && self.selected_kind
-                                                                == Some(NodeKind::File),
-                                                        |actions| {
-                                                            actions.child(
-                                                                Button::new("open-file-system")
-                                                                    .label("系统应用打开")
-                                                                    .on_click(cx.listener(
-                                                                        |this, _, _, cx| {
-                                                                            this.open_file_with_system(cx);
-                                                                        },
-                                                                    )),
-                                                            )
-                                                        },
-                                                    )
-                                                    .when(self.show_trash, |actions| {
-                                                        actions
-                                                            .child(
-                                                                Button::new("restore")
-                                                                    .label("恢复")
-                                                                    .on_click(cx.listener(
-                                                                        |this, _, window, cx| {
-                                                                            this.restore_selected(
-                                                                                window, cx,
-                                                                            );
-                                                                        },
-                                                                    )),
-                                                            )
-                                                            .child(
-                                                                Button::new("purge")
-                                                                    .label("永久删除")
-                                                                    .danger()
-                                                                    .on_click(cx.listener(
-                                                                        |this, _, window, cx| {
-                                                                            this.confirm_purge(
-                                                                                window, cx,
-                                                                            );
-                                                                        },
-                                                                    )),
-                                                            )
-                                                    })
-                                                    .when(!self.show_trash, |actions| {
-                                                        actions.child(
-                                                            Button::new("trash")
-                                                                .label("移到回收站")
-                                                                .danger()
-                                                                .on_click(cx.listener(
-                                                                    |this, _, window, cx| {
-                                                                        this.move_selected_to_trash(
-                                                                            window, cx,
-                                                                        );
-                                                                    },
-                                                                )),
-                                                        )
-                                                    }),
-                                            ),
-                                    )
-                            }),
-                    ),
-            )
-    }
-}
-
 fn engine_id(kind: NodeKind) -> &'static str {
     match kind {
         NodeKind::Folder => "ideall.directory",
@@ -2836,17 +2191,6 @@ fn engine_id(kind: NodeKind) -> &'static str {
         NodeKind::File => "ideall.preview",
         NodeKind::Feed => "ideall.feed",
         NodeKind::Thread => "ideall.thread",
-    }
-}
-
-fn kind_icon(kind: NodeKind) -> &'static str {
-    match kind {
-        NodeKind::Folder => "▸",
-        NodeKind::Note => "N",
-        NodeKind::Bookmark => "↗",
-        NodeKind::File => "F",
-        NodeKind::Feed => "◎",
-        NodeKind::Thread => "#",
     }
 }
 
@@ -2885,56 +2229,6 @@ fn acp_tool_status_label(status: AcpToolStatus) -> &'static str {
     }
 }
 
-fn code_language_for_node(service: &LocalWorkspace, id: &str) -> &'static str {
-    let Ok(file) = service.file_metadata(id) else {
-        return "markdown";
-    };
-    let extension = file
-        .name
-        .rsplit_once('.')
-        .map(|(_, extension)| extension.to_ascii_lowercase());
-    match (file.media_type.as_str(), extension.as_deref()) {
-        (_, Some("rs")) => "rust",
-        (_, Some("ts" | "tsx")) => "typescript",
-        (_, Some("js" | "jsx" | "mjs" | "cjs")) => "javascript",
-        ("application/json", _) | (_, Some("json")) => "json",
-        ("text/markdown", _) | (_, Some("md" | "mdx")) => "markdown",
-        (_, Some("toml")) => "toml",
-        (_, Some("yaml" | "yml")) => "yaml",
-        ("text/html", _) | (_, Some("html" | "htm")) => "html",
-        ("text/css", _) | (_, Some("css")) => "css",
-        (_, Some("py")) => "python",
-        (_, Some("go")) => "go",
-        (_, Some("c" | "h")) => "c",
-        (_, Some("cc" | "cpp" | "cxx" | "hpp")) => "cpp",
-        (_, Some("sh" | "bash")) => "bash",
-        (_, Some("sql")) => "sql",
-        _ => "markdown",
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-fn create_embedded_browser(
-    url: &str,
-    window: &mut Window,
-    cx: &mut Context<IdeallDesktop>,
-) -> Result<Entity<WebView>, String> {
-    let webview = wry::WebViewBuilder::new()
-        .with_url(url)
-        .build_as_child(window)
-        .map_err(|error| error.to_string())?;
-    Ok(cx.new(|cx| WebView::new(webview, window, cx)))
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn create_embedded_browser(
-    _url: &str,
-    _window: &mut Window,
-    _cx: &mut Context<IdeallDesktop>,
-) -> Result<Entity<WebView>, String> {
-    Err("当前 Linux GPUI 后端不支持可靠的子窗口 WebView；可使用“系统浏览器打开”".into())
-}
-
 fn native_database_path() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os("IDEALL_NATIVE_DATA_DIR") {
         let directory = PathBuf::from(path);
@@ -2963,6 +2257,19 @@ fn select_linux_backend() {
 #[cfg(not(target_os = "linux"))]
 fn select_linux_backend() {}
 
+fn desktop_window_options(cx: &App) -> WindowOptions {
+    WindowOptions {
+        window_bounds: Some(WindowBounds::centered(size(px(1280.0), px(820.0)), cx)),
+        titlebar: Some(TitlebarOptions {
+            title: Some("ideall · 本地信息终端".into()),
+            ..Default::default()
+        }),
+        window_min_size: Some(size(px(920.0), px(600.0))),
+        app_id: Some("com.jinziyou.ideall".into()),
+        ..Default::default()
+    }
+}
+
 fn main() {
     select_linux_backend();
     let secure_store_error = ideall_secrets::initialize_platform()
@@ -2970,6 +2277,8 @@ fn main() {
         .map(|error| format!("无法初始化系统安全存储：{error}"));
     Application::new().run(move |cx: &mut App| {
         gpui_component::init(cx);
+        Theme::change(ThemeMode::Light, None, cx);
+        actions::init(cx);
         let initialized = (|| {
             if let Some(error) = secure_store_error {
                 return Err(error);
@@ -2981,14 +2290,14 @@ fn main() {
         })();
         let window_result = match initialized {
             Ok((database_path, service)) => cx
-                .open_window(WindowOptions::default(), |window, cx| {
+                .open_window(desktop_window_options(cx), |window, cx| {
                     let workspace =
                         cx.new(|cx| IdeallDesktop::new(database_path, service, window, cx));
                     cx.new(|cx| Root::new(workspace, window, cx))
                 })
                 .map(|_| ()),
             Err(message) => cx
-                .open_window(WindowOptions::default(), |_window, cx| {
+                .open_window(desktop_window_options(cx), |_window, cx| {
                     cx.new(|_| DesktopStartupFailure { message })
                 })
                 .map(|_| ()),

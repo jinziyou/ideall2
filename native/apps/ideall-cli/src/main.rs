@@ -1,6 +1,6 @@
-use std::fs;
-use std::path::PathBuf;
+use std::{fs, io::Cursor, path::PathBuf};
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use clap::{Parser, Subcommand};
 use ideall_acp::{ExternalAcpConfig, run_external_acp};
 use ideall_agent::{CompletionProvider, ModelMessage, ModelRole, OpenAiCompatibleClient};
@@ -11,11 +11,14 @@ use ideall_storage::{
 };
 use ideall_sync_http::HttpSyncTransport;
 use ideall_updater::parse_verified_manifest;
+use minisign::{SecretKeyBox, sign};
 
 const PASSPHRASE_ENV: &str = "IDEALL_ARCHIVE_PASSPHRASE";
 const MODEL_KEY_ENV: &str = "IDEALL_MODEL_API_KEY";
 const SYNC_CODE_ENV: &str = "IDEALL_SYNC_CODE";
 const SYNC_TOKEN_ENV: &str = "IDEALL_SYNC_BEARER_TOKEN";
+const UPDATE_PRIVATE_KEY_ENV: &str = "IDEALL_UPDATE_PRIVATE_KEY";
+const UPDATE_PRIVATE_KEY_PASSWORD_ENV: &str = "IDEALL_UPDATE_PRIVATE_KEY_PASSWORD";
 
 #[derive(Parser)]
 #[command(
@@ -77,6 +80,13 @@ enum Command {
         signature: PathBuf,
         #[arg(long)]
         channel: String,
+    },
+    /// Sign an update or Registry payload with the protected Minisign root.
+    UpdateSign {
+        #[arg(long)]
+        manifest: PathBuf,
+        #[arg(long)]
+        signature: PathBuf,
     },
 }
 
@@ -248,6 +258,20 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             println!("version: {}", manifest.version);
             println!("artifacts: {}", manifest.artifacts.len());
         }
+        Command::UpdateSign {
+            manifest,
+            signature,
+        } => {
+            let private_key = required_secret(UPDATE_PRIVATE_KEY_ENV)?;
+            let password = required_secret(UPDATE_PRIVATE_KEY_PASSWORD_ENV)?;
+            let content = fs::read(&manifest)?;
+            fs::write(
+                signature,
+                sign_update_payload(&private_key, &password, &content)?,
+            )?;
+            println!("status: signed");
+            println!("bytes: {}", content.len());
+        }
     }
     Ok(())
 }
@@ -258,6 +282,38 @@ fn required_secret(name: &'static str) -> Result<String, Box<dyn std::error::Err
         return Err(format!("{name} is required").into());
     }
     Ok(value)
+}
+
+fn decode_private_key_document(value: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let value = value.trim();
+    if value.starts_with("untrusted comment:") {
+        return Ok(value.to_owned());
+    }
+    let decoded = STANDARD
+        .decode(value)
+        .map_err(|_| format!("{UPDATE_PRIVATE_KEY_ENV} is neither a Minisign key nor base64"))?;
+    Ok(String::from_utf8(decoded)
+        .map_err(|_| format!("{UPDATE_PRIVATE_KEY_ENV} is not valid UTF-8"))?)
+}
+
+fn sign_update_payload(
+    private_key: &str,
+    password: &str,
+    content: &[u8],
+) -> Result<String, Box<dyn std::error::Error>> {
+    let key_document = decode_private_key_document(private_key)?;
+    let secret_key =
+        SecretKeyBox::from_string(&key_document)?.into_secret_key(Some(password.to_owned()))?;
+    let signature_box = sign(
+        None,
+        &secret_key,
+        Cursor::new(content),
+        None,
+        Some("signature from ideall native release key"),
+    )?;
+    // Preserve the historical updater `.sig` wire: base64 of the full
+    // four-line Minisign signature document.
+    Ok(STANDARD.encode(signature_box.into_string()))
 }
 
 fn archive_plaintext(raw: &str, encrypted: bool) -> Result<String, Box<dyn std::error::Error>> {
@@ -271,4 +327,45 @@ fn archive_plaintext(raw: &str, encrypted: bool) -> Result<String, Box<dyn std::
         &passphrase,
         ArchiveLimits::default(),
     )?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use minisign::{KeyPair, SignatureBox, verify};
+
+    #[test]
+    fn native_update_signer_round_trips_the_historical_wire_format() {
+        let password = "test-only-password";
+        let payload = b"native update manifest";
+        let key_pair =
+            KeyPair::generate_encrypted_keypair(Some(password.to_owned())).expect("key pair");
+        let private_key = key_pair
+            .sk
+            .to_box(None)
+            .expect("secret key box")
+            .to_string();
+        let encoded_private_key = STANDARD.encode(private_key);
+
+        let wire_signature =
+            sign_update_payload(&encoded_private_key, password, payload).expect("signature");
+        let signature_document = String::from_utf8(
+            STANDARD
+                .decode(wire_signature)
+                .expect("base64 signature document"),
+        )
+        .expect("utf-8 signature document");
+        let signature_box =
+            SignatureBox::from_string(&signature_document).expect("Minisign signature");
+
+        verify(
+            &key_pair.pk,
+            &signature_box,
+            Cursor::new(payload),
+            true,
+            false,
+            false,
+        )
+        .expect("valid signature");
+    }
 }

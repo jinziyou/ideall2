@@ -1454,8 +1454,12 @@ pub fn run() {
             capture_share::enqueue_deep_links(&deep_link_handle, event.urls());
         });
 
+        // Linux 需 `update-desktop-database` (desktop-file-utils); WSL/精简环境常缺失。
+        // 注册失败只影响 ideall:// 协议，不应阻断启动。
         #[cfg(any(target_os = "linux", windows))]
-        app.deep_link().register_all()?;
+        if let Err(error) = app.deep_link().register_all() {
+            eprintln!("[ideall] deep link register_all skipped: {error}");
+        }
 
         #[cfg(desktop)]
         {

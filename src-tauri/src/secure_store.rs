@@ -38,13 +38,47 @@ fn validate_value(value: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Linux 默认走 Secret Service（`linux-native-sync-persistent`）。
+/// WSL / 无 gnome-keyring 的环境里 DBus 名不可激活，任何 get/set/delete 都会失败，
+/// 进而让 0.2 data-epoch 清凭据卡死在 BootGate。探测失败时回退到会话级 keyutils。
+#[cfg(target_os = "linux")]
+fn ensure_linux_credential_backend() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        use keyring::credential::CredentialApi;
+        let secret_service_usable = keyring::secret_service::SsCredential::new_with_target(
+            None,
+            SERVICE,
+            "ideall:backend-probe",
+        )
+        .and_then(|credential| match credential.get_password() {
+            Ok(_) => Ok(()),
+            Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(error),
+        })
+        .is_ok();
+        if secret_service_usable {
+            return;
+        }
+        eprintln!(
+            "[ideall] Secret Service unavailable; falling back to linux keyutils for credentials"
+        );
+        keyring::set_default_credential_builder(keyring::keyutils::default_credential_builder());
+    });
+}
+
 fn entry(key: &str) -> Result<keyring::Entry, String> {
+    #[cfg(target_os = "linux")]
+    ensure_linux_credential_backend();
     let k = validate_key(key)?;
     keyring::Entry::new(SERVICE, k).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn secure_store_status() -> SecureStoreStatus {
+    #[cfg(target_os = "linux")]
+    ensure_linux_credential_backend();
     SecureStoreStatus {
         backend: "system-keychain",
         native: true,

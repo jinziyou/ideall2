@@ -91,7 +91,7 @@ GPUI App 不直接读取旧 WebView 的 IndexedDB。迁移通过 V2 工作区归
 ## 验证与发布
 
 ```bash
-pnpm verify            # 仓库维护门禁 + 原生 check/fmt/clippy/test
+pnpm verify            # 仓库维护门禁 + 原生 fmt/clippy/test
 pnpm version:check     # Cargo、桌面包与移动包版本一致性
 pnpm test:scripts      # 发布与仓库维护脚本测试
 ```

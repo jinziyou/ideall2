@@ -23,7 +23,7 @@
 | `pnpm version:check` | 校验 Cargo 与平台包版本 |
 | `pnpm test:scripts` | 隔离运行 `scripts/*.test.mjs` |
 | `pnpm verify:checks` | 运行格式、文档、Actions、版本与脚本门禁 |
-| `pnpm verify` | 在轻量门禁后运行完整原生 check/lint/test |
+| `pnpm verify` | 在轻量门禁后运行完整原生 fmt/clippy/test |
 
 `test:scripts` 支持用文件名子串过滤：
 

@@ -19,6 +19,10 @@ pub enum NoteBlockStyle {
     Todo,
     Code,
     Rule,
+    Callout,
+    Toggle,
+    Equation,
+    Bookmark,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -127,6 +131,34 @@ const SLASH_COMMANDS: &[(&str, &str, &str, &[&str], NoteBlockStyle)] = &[
         "划分内容区域",
         &["hr", "rule", "divider", "分隔线"],
         NoteBlockStyle::Rule,
+    ),
+    (
+        "callout",
+        "提示框",
+        "创建带图标的强调内容",
+        &["callout", "notice", "提示", "强调"],
+        NoteBlockStyle::Callout,
+    ),
+    (
+        "toggle",
+        "折叠块",
+        "创建可展开和收起的内容",
+        &["toggle", "details", "折叠"],
+        NoteBlockStyle::Toggle,
+    ),
+    (
+        "equation",
+        "公式块",
+        "创建数学公式",
+        &["math", "equation", "latex", "公式"],
+        NoteBlockStyle::Equation,
+    ),
+    (
+        "bookmark",
+        "网页书签",
+        "把 HTTP(S) 地址显示为书签卡片",
+        &["bookmark", "web", "link", "书签", "网页"],
+        NoteBlockStyle::Bookmark,
     ),
 ];
 
@@ -330,7 +362,12 @@ pub fn apply_note_block_style(
         NoteBlockStyle::Bullet => "- ",
         NoteBlockStyle::Ordered => "1. ",
         NoteBlockStyle::Todo => "- [ ] ",
-        NoteBlockStyle::Code | NoteBlockStyle::Rule => "",
+        NoteBlockStyle::Code
+        | NoteBlockStyle::Rule
+        | NoteBlockStyle::Callout
+        | NoteBlockStyle::Toggle
+        | NoteBlockStyle::Equation
+        | NoteBlockStyle::Bookmark => "",
     };
     let keep_indent = matches!(
         style,
@@ -340,6 +377,10 @@ pub fn apply_note_block_style(
     let replacement = match style {
         NoteBlockStyle::Code => format!("```\n{content}\n```"),
         NoteBlockStyle::Rule => "---".to_owned(),
+        NoteBlockStyle::Callout => format!(":::callout 💡\n{content}\n:::"),
+        NoteBlockStyle::Toggle => format!(":::toggle open\n{content}\n:::"),
+        NoteBlockStyle::Equation => format!("$$\n{content}\n$$"),
+        NoteBlockStyle::Bookmark => format!(":::bookmark\n{content}\n:::"),
         _ => format!("{indentation}{prefix}{content}"),
     };
     if replacement == line {
@@ -349,6 +390,10 @@ pub fn apply_note_block_style(
     let new_cursor = match style {
         NoteBlockStyle::Code => line_start + "```\n".len() + content_cursor,
         NoteBlockStyle::Rule => line_start + replacement.len(),
+        NoteBlockStyle::Callout => line_start + ":::callout 💡\n".len() + content_cursor,
+        NoteBlockStyle::Toggle => line_start + ":::toggle open\n".len() + content_cursor,
+        NoteBlockStyle::Equation => line_start + "$$\n".len() + content_cursor,
+        NoteBlockStyle::Bookmark => line_start + ":::bookmark\n".len() + content_cursor,
         _ => line_start + indentation.len() + prefix.len() + content_cursor,
     };
     target.replace_range(line_start..line_end, &replacement);
@@ -421,6 +466,39 @@ fn block_ranges(target: &str) -> Option<Vec<Range<usize>>> {
             while index < lines.len() {
                 end = lines[index].1;
                 if lines[index].2 == "```" {
+                    index += 1;
+                    closed = true;
+                    break;
+                }
+                index += 1;
+            }
+            if !closed {
+                return None;
+            }
+        } else if line.starts_with(":::callout ")
+            || line.starts_with(":::toggle ")
+            || line == ":::bookmark"
+        {
+            index += 1;
+            let mut closed = false;
+            while index < lines.len() {
+                end = lines[index].1;
+                if lines[index].2 == ":::" {
+                    index += 1;
+                    closed = true;
+                    break;
+                }
+                index += 1;
+            }
+            if !closed {
+                return None;
+            }
+        } else if line == "$$" {
+            index += 1;
+            let mut closed = false;
+            while index < lines.len() {
+                end = lines[index].1;
+                if lines[index].2 == "$$" {
                     index += 1;
                     closed = true;
                     break;
@@ -578,6 +656,30 @@ mod tests {
         );
         assert_eq!(text, "before\n### ");
         assert_eq!(cursor, text.len());
+
+        let commands = note_slash_commands("公式");
+        assert_eq!(
+            commands.first().map(|command| command.style),
+            Some(NoteBlockStyle::Equation)
+        );
+    }
+
+    #[test]
+    fn advanced_directive_blocks_move_as_single_units() {
+        let mut text = "alpha\n:::callout 💡\nimportant\n:::\n$$\nx + y\n$$\nomega".to_owned();
+        let mut cursor = text.find("important").unwrap();
+        assert_eq!(
+            move_note_block(&mut text, &mut cursor, NoteBlockMove::Up),
+            Some(true)
+        );
+        assert!(text.starts_with(":::callout 💡\nimportant\n:::\nalpha"));
+
+        cursor = text.find("x + y").unwrap();
+        assert_eq!(
+            move_note_block(&mut text, &mut cursor, NoteBlockMove::Down),
+            Some(true)
+        );
+        assert!(text.ends_with("omega\n$$\nx + y\n$$"));
     }
 
     #[test]

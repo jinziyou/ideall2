@@ -52,7 +52,7 @@ impl IdeallDesktop {
                     .bg(rgb(SURFACE))
                     .child(
                         Button::new("browser-back")
-                            .label("←")
+                            .icon(IconName::ArrowLeft)
                             .tooltip("后退")
                             .small()
                             .ghost()
@@ -63,7 +63,7 @@ impl IdeallDesktop {
                     )
                     .child(
                         Button::new("browser-forward")
-                            .label("→")
+                            .icon(IconName::ArrowRight)
                             .tooltip("前进")
                             .small()
                             .ghost()
@@ -74,7 +74,7 @@ impl IdeallDesktop {
                     )
                     .child(
                         Button::new("browser-reload")
-                            .label("↻")
+                            .icon(IconName::Redo)
                             .tooltip("重新加载")
                             .small()
                             .ghost()
@@ -87,11 +87,18 @@ impl IdeallDesktop {
                         Input::new(self.browser.address_input())
                             .w_full()
                             .small()
-                            .prefix(div().pl_1().text_color(rgb(INK_FAINT)).child("⌁")),
+                            .prefix(
+                                div().pl_1().child(
+                                    Icon::new(IconName::Globe)
+                                        .size(px(14.0))
+                                        .text_color(rgb(INK_FAINT)),
+                                ),
+                            ),
                     )
                     .child(
                         Button::new("browser-open-external")
                             .label("外部打开")
+                            .icon(IconName::ExternalLink)
                             .small()
                             .ghost()
                             .disabled(current_url.is_empty())
@@ -103,6 +110,7 @@ impl IdeallDesktop {
                         toolbar.child(
                             Button::new("browser-edit-bookmark")
                                 .label("编辑书签")
+                                .icon(IconName::BookOpen)
                                 .small()
                                 .primary()
                                 .on_click(cx.listener(|this, _, window, cx| {

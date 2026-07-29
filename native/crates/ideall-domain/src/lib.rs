@@ -11,4 +11,6 @@ pub use engine_registry::{
 pub use engine_runtime::{
     EnginePlatform, EngineRuntimeCapability, EngineRuntimeKind, engine_runtime_capabilities,
 };
-pub use workspace::{ExplorerLayoutState, TabDescriptor, WorkspaceKind, WorkspaceState, tab_key};
+pub use workspace::{
+    AgentPanelState, ExplorerLayoutState, TabDescriptor, WorkspaceKind, WorkspaceState, tab_key,
+};

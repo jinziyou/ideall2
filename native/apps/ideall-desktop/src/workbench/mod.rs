@@ -1,4 +1,4 @@
-mod actions;
+pub(crate) mod actions;
 mod view;
 
 pub(crate) fn init(cx: &mut gpui::App) {

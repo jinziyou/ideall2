@@ -9,8 +9,9 @@ use std::{path::PathBuf, time::Duration};
 
 use directories::ProjectDirs;
 use gpui::{
-    App, Application, Context, Entity, IntoElement, MouseButton, PathPromptOptions, PromptButton,
-    PromptLevel, Render, SharedString, Subscription, Task, Window, div, prelude::*, px, rgb, size,
+    App, Application, ClipboardItem, Context, Entity, IntoElement, MouseButton, MouseDownEvent,
+    PathPromptOptions, PromptButton, PromptLevel, Render, ScrollHandle, SharedString, Subscription,
+    Task, Window, div, prelude::*, px, rgb, size,
 };
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use gpui_component::webview::WebView;
@@ -26,10 +27,11 @@ use gpui_component::{
 };
 use ideall_acp::{AcpToolStatus, ExternalAcpConfig, command_exists, run_external_acp};
 use ideall_application::{
-    AgentAuditRecord, AgentModelSettings, AgentToolRun, AgentTranscriptMessage, AuditStatus,
-    ExternalAcpSettings, HOME_ROOT_ID, LocalWorkspace, ModelRole, NodeSummary, NoteBlockIndent,
-    NoteBlockMove, NoteBlockStyle, NoteInlineStyle, NoteSlashCommand, OpenAiCompatibleClient,
-    SyncSettings, note_slash_commands, note_slash_query,
+    AgentAuditRecord, AgentDocumentContext, AgentModelSettings, AgentToolRun,
+    AgentTranscriptMessage, AuditStatus, ExternalAcpSettings, HOME_ROOT_ID, LocalWorkspace,
+    ModelRole, NodeSummary, NoteBlockIndent, NoteBlockMove, NoteBlockStyle, NoteColor,
+    NoteInlineStyle, NoteSlashCommand, OpenAiCompatibleClient, SyncSettings, note_mention_query,
+    note_node_id_from_url, note_node_url, note_slash_commands, note_slash_query,
 };
 use ideall_domain::{
     EnginePlatform, EnginePreferences, EngineRuntimeKind, ExplorerLayoutState, TabDescriptor,
@@ -51,13 +53,13 @@ use ideall_sync::{is_valid_sync_code, normalize_sync_code};
 use ideall_sync_http::HttpSyncTransport;
 use ideall_updater::{AvailableUpdate, UpdateStatus, updater_from_environment};
 
-use assets::IdeallAssets;
+use assets::{IdeallAssets, IdeallIcon};
 use browser::{BrowserWorkspace, browser_surface};
 use editor::{
-    EditorInputs, EditorMode, EditorWorkspace, LoadedDocument, engine_icon, kind_color_for_engine,
+    EditorInputs, EditorMode, EditorWorkspace, LoadedDocument, engine_icon,
     position_for_byte_offset, text_highlight_for_node,
 };
-use explorer::{DraggedNode, ExplorerState, kind_color, kind_icon};
+use explorer::{DraggedNode, ExplorerState};
 use windowing::desktop_window_options;
 
 const INFO_PORTAL_URL: &str = "https://www.wonita.link/info";
@@ -125,6 +127,8 @@ struct IdeallDesktop {
     active_section: SharedString,
     show_trash: bool,
     search_query: String,
+    mentionable_notes: Vec<NodeSummary>,
+    note_backlinks: Vec<NodeSummary>,
     search_requests: LatestRequest,
     search_task: Option<Task<()>>,
     suppress_search_events: bool,
@@ -148,8 +152,10 @@ struct IdeallDesktop {
     update_status: Option<SharedString>,
     agent_key_configured: bool,
     agent_in_progress: bool,
+    agent_context_attached: bool,
     agent_thread_id: Option<String>,
     agent_transcript: Vec<AgentTranscriptMessage>,
+    agent_scroll_handle: ScrollHandle,
     agent_audits: Vec<AgentAuditRecord>,
     agent_threads: Vec<NodeSummary>,
     agent_activity_loading: bool,
@@ -181,12 +187,15 @@ impl IdeallDesktop {
         let text_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .code_editor("text")
-                .line_number(false)
+                .line_number(true)
+                .soft_wrap(false)
                 .searchable(true)
                 .placeholder("文件内容")
         });
         let find_input = cx.new(|cx| InputState::new(window, cx).placeholder("在当前文件中查找"));
         let replace_input = cx.new(|cx| InputState::new(window, cx).placeholder("替换为"));
+        let link_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("https://example.com"));
         let rename_input = cx.new(|cx| InputState::new(window, cx).placeholder("输入新名称"));
         let explorer_resize_state = cx.new(|_| ResizableState::default());
         let sync_server = service.load_sync_settings().unwrap_or_default();
@@ -298,6 +307,15 @@ impl IdeallDesktop {
                 cx.notify();
             }
         });
+        let link_subscription = cx.subscribe_in(
+            &link_input,
+            window,
+            |this, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.commit_note_link(window, cx);
+                }
+            },
+        );
         let browser_address_subscription = cx.subscribe_in(
             &browser_address_input,
             window,
@@ -305,6 +323,15 @@ impl IdeallDesktop {
                 if matches!(event, InputEvent::PressEnter { .. }) {
                     let url = input.read(cx).value().to_string();
                     this.navigate_browser_to(&url, true, window, cx);
+                }
+            },
+        );
+        let agent_prompt_subscription = cx.subscribe_in(
+            &agent_prompt_input,
+            window,
+            |this, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::PressEnter { secondary: true }) {
+                    this.start_agent_turn(window, cx);
                 }
             },
         );
@@ -348,8 +375,14 @@ impl IdeallDesktop {
                 text: text_input,
                 find: find_input,
                 replace: replace_input,
+                link: link_input,
             },
         );
+        let mentionable_notes = items
+            .iter()
+            .filter(|item| item.kind == NodeKind::Note && !item.deleted)
+            .cloned()
+            .collect();
         let explorer =
             ExplorerState::new(items, explorer_layout, rename_input, explorer_resize_state);
         let browser = BrowserWorkspace::new(browser_address_input);
@@ -365,6 +398,8 @@ impl IdeallDesktop {
             active_section: "我的".into(),
             show_trash: false,
             search_query: String::new(),
+            mentionable_notes,
+            note_backlinks: Vec::new(),
             search_requests: LatestRequest::default(),
             search_task: None,
             suppress_search_events: false,
@@ -388,8 +423,10 @@ impl IdeallDesktop {
             update_status: None,
             agent_key_configured,
             agent_in_progress: false,
+            agent_context_attached: false,
             agent_thread_id,
             agent_transcript,
+            agent_scroll_handle: ScrollHandle::new(),
             agent_audits: Vec::new(),
             agent_threads: Vec::new(),
             agent_activity_loading: false,
@@ -400,7 +437,9 @@ impl IdeallDesktop {
                 text_subscription,
                 find_subscription,
                 replace_subscription,
+                link_subscription,
                 browser_address_subscription,
+                agent_prompt_subscription,
                 body_observer,
                 text_observer,
                 search_subscription,
@@ -409,6 +448,7 @@ impl IdeallDesktop {
                 window_activation,
             ],
         };
+        this.agent_scroll_handle.scroll_to_bottom();
         let active_tab = this
             .editor
             .workspace
@@ -427,10 +467,17 @@ impl IdeallDesktop {
             this.activate_engine(&engine_id, &id, window, cx);
             this.editor.restore_active_session(window, cx);
         }
+        this.load_agent_activity(cx);
         this
     }
 
     fn refresh_items(&mut self) {
+        if let Ok(items) = self.service.list_home() {
+            self.mentionable_notes = items
+                .into_iter()
+                .filter(|item| item.kind == NodeKind::Note && !item.deleted)
+                .collect();
+        }
         let result = if self.show_trash {
             self.service.list_trash()
         } else if !self.search_query.trim().is_empty() {
@@ -524,6 +571,9 @@ impl IdeallDesktop {
                 self.show_trash = false;
                 self.refresh_items();
                 self.open_node(node.base().id.clone(), window, cx);
+                self.editor
+                    .title_input
+                    .update(cx, |input, cx| input.focus(window, cx));
                 self.status = Some("已创建本地笔记".into());
             }
             Err(error) => self.status = Some(error.to_string().into()),
@@ -541,8 +591,14 @@ impl IdeallDesktop {
                 self.explorer.reveal_folder(node.base().id.clone());
                 self.show_trash = false;
                 self.refresh_items();
-                self.open_node(node.base().id.clone(), window, cx);
-                self.status = Some("已创建文件夹".into());
+                self.explorer.begin_rename(
+                    node.base().id.clone(),
+                    node.base().title.clone(),
+                    window,
+                    cx,
+                );
+                self.persist_workspace();
+                self.status = Some("输入文件夹名称并按 Enter".into());
             }
             Err(error) => self.status = Some(error.to_string().into()),
         }
@@ -562,6 +618,9 @@ impl IdeallDesktop {
                 self.show_trash = false;
                 self.refresh_items();
                 self.open_node(node.base().id.clone(), window, cx);
+                self.editor
+                    .title_input
+                    .update(cx, |input, cx| input.focus(window, cx));
                 self.status = Some("请修改书签标题与网址后保存".into());
             }
             Err(error) => self.status = Some(error.to_string().into()),
@@ -582,6 +641,9 @@ impl IdeallDesktop {
                 self.show_trash = false;
                 self.refresh_items();
                 self.open_node(node.base().id.clone(), window, cx);
+                self.editor
+                    .title_input
+                    .update(cx, |input, cx| input.focus(window, cx));
                 self.status = Some("已创建本地文件与 Blob".into());
             }
             Err(error) => self.status = Some(error.to_string().into()),
@@ -682,6 +744,9 @@ impl IdeallDesktop {
     ) -> Option<(NodeKind, String)> {
         match self.service.node(id) {
             Ok(node) => {
+                if self.editor.selected_id.as_deref() != Some(id) {
+                    self.agent_context_attached = false;
+                }
                 self.detach_pending_autosave(cx);
                 let kind = node.kind();
                 let title = node.base().title.clone();
@@ -699,6 +764,11 @@ impl IdeallDesktop {
                     window,
                     cx,
                 );
+                self.note_backlinks = if kind == NodeKind::Note {
+                    self.service.note_backlinks(id, 32).unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
                 self.status = if kind == NodeKind::Note && protected_blocks > 0 {
                     Some(
                         format!(
@@ -714,6 +784,7 @@ impl IdeallDesktop {
                 Some((kind, title))
             }
             Err(error) => {
+                self.note_backlinks.clear();
                 self.status = Some(error.to_string().into());
                 None
             }
@@ -823,10 +894,29 @@ impl IdeallDesktop {
             draft.body_editable.then_some(draft.body.as_str()),
         );
         match result {
-            Ok(_) => {
+            Ok(node) => {
+                let summary = NodeSummary::from(&node);
                 self.editor.dirty = false;
                 self.refresh_items();
-                self.open_node(draft.id, window, cx);
+                for tab in &mut self.editor.workspace.tabs {
+                    if tab.file.file_id == draft.id {
+                        tab.title = summary.title.clone();
+                    }
+                }
+                if let Node::Bookmark { content, .. } = node {
+                    self.editor.suppress_events = true;
+                    self.editor.body_input.update(cx, |input, cx| {
+                        input.set_value(content.url, window, cx);
+                    });
+                    self.editor.suppress_events = false;
+                }
+                if self.editor.selected_kind == Some(NodeKind::File) {
+                    let language = text_highlight_for_node(&self.service, &draft.id);
+                    self.editor
+                        .text_input
+                        .update(cx, |input, cx| input.set_highlighter(language, cx));
+                }
+                self.persist_workspace();
                 self.status = Some("已保存到本地 SQLite".into());
             }
             Err(error) => self.status = Some(error.to_string().into()),
@@ -1215,24 +1305,6 @@ impl IdeallDesktop {
         cx.notify();
     }
 
-    fn create_agent_draft(&mut self, cx: &mut Context<Self>) {
-        match self.service.create_agent_note_via_mcp("Agent 草稿") {
-            Ok(node) => {
-                self.refresh_items();
-                self.status = Some(
-                    format!(
-                        "Agent 已通过本地 MCP 创建空白笔记 {}；写操作审计已提交",
-                        node.base().id
-                    )
-                    .into(),
-                );
-            }
-            Err(error) => self.status = Some(error.to_string().into()),
-        }
-        self.load_agent_activity(cx);
-        cx.notify();
-    }
-
     fn persist_agent_model_settings(
         &mut self,
         window: &mut Window,
@@ -1297,6 +1369,63 @@ impl IdeallDesktop {
         cx.notify();
     }
 
+    fn fill_agent_prompt(
+        &mut self,
+        prompt: &'static str,
+        attach_document: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if attach_document && self.editor.has_selection() {
+            self.agent_context_attached = true;
+            self.status = Some("已附加当前文档；确认问题后按 Ctrl/⌘ Enter 发送".into());
+        }
+        self.agent_prompt_input.update(cx, |input, cx| {
+            input.set_value(prompt, window, cx);
+            input.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    fn toggle_agent_panel(&mut self, cx: &mut Context<Self>) {
+        self.editor.workspace.agent.visible = !self.editor.workspace.agent.visible;
+        if self.editor.workspace.agent.visible {
+            self.load_agent_activity(cx);
+        }
+        self.persist_workspace();
+        cx.notify();
+    }
+
+    fn focus_agent_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.agent_key_configured {
+            self.select_section("应用", window, cx);
+            return;
+        }
+        if !self.editor.workspace.agent.visible {
+            self.editor.workspace.agent.visible = true;
+            self.load_agent_activity(cx);
+            self.persist_workspace();
+        }
+        self.agent_prompt_input
+            .update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    }
+
+    fn toggle_agent_document_context(&mut self, cx: &mut Context<Self>) {
+        if !self.editor.has_selection() {
+            self.agent_context_attached = false;
+            self.status = Some("请先打开一个文档".into());
+        } else {
+            self.agent_context_attached = !self.agent_context_attached;
+            self.status = Some(if self.agent_context_attached {
+                "当前文档将在本次 Agent 请求中作为参考；切换文档会自动移除".into()
+            } else {
+                "已从 Agent 请求中移除当前文档".into()
+            });
+        }
+        cx.notify();
+    }
+
     fn select_agent_thread(&mut self, thread_id: String, cx: &mut Context<Self>) {
         if self.agent_in_progress {
             return;
@@ -1305,6 +1434,7 @@ impl IdeallDesktop {
             Ok(messages) => {
                 self.agent_thread_id = Some(thread_id);
                 self.agent_transcript = messages;
+                self.agent_scroll_handle.scroll_to_bottom();
                 self.status = Some("已打开本地 Agent 对话".into());
             }
             Err(error) => self.status = Some(error.to_string().into()),
@@ -1350,6 +1480,21 @@ impl IdeallDesktop {
         };
         let database_path = self.database_path.clone();
         let thread_id = self.agent_thread_id.clone();
+        let document_context =
+            (self.agent_context_attached && self.editor.has_selection()).then(|| {
+                AgentDocumentContext {
+                    id: self.editor.selected_id.clone().unwrap_or_default(),
+                    title: self.editor.title_input.read(cx).value().to_string(),
+                    content: self.editor.active_text(cx),
+                }
+            });
+        self.agent_transcript.push(AgentTranscriptMessage {
+            role: ModelRole::User,
+            content: prompt.clone(),
+        });
+        self.agent_prompt_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.agent_scroll_handle.scroll_to_bottom();
         let task = cx.background_executor().spawn(async move {
             let mut workspace =
                 LocalWorkspace::open(database_path).map_err(|error| error.to_string())?;
@@ -1357,14 +1502,19 @@ impl IdeallDesktop {
                 OpenAiCompatibleClient::new(&settings.base_url, &settings.model, &key)
                     .map_err(|error| error.to_string())?;
             workspace
-                .run_agent_turn(&mut provider, thread_id.as_deref(), &prompt)
+                .run_agent_turn_with_context(
+                    &mut provider,
+                    thread_id.as_deref(),
+                    &prompt,
+                    document_context.as_ref(),
+                )
                 .map_err(|error| error.to_string())
         });
         self.agent_in_progress = true;
         self.status = Some("Agent 正在本机直连模型服务……".into());
         cx.spawn_in(window, async move |view, cx| {
             let result = task.await;
-            let _ = view.update_in(cx, |this, window, cx| {
+            let _ = view.update_in(cx, |this, _window, cx| {
                 this.agent_in_progress = false;
                 match result {
                     Ok(result) => {
@@ -1373,8 +1523,7 @@ impl IdeallDesktop {
                             .service
                             .agent_transcript(&result.thread_id)
                             .unwrap_or_default();
-                        this.agent_prompt_input
-                            .update(cx, |input, cx| input.set_value("", window, cx));
+                        this.agent_scroll_handle.scroll_to_bottom();
                         this.refresh_items();
                         let failures = result.tools.iter().filter(|tool| !tool.ok).count();
                         this.status = Some(if result.tools.is_empty() {
@@ -1402,6 +1551,7 @@ impl IdeallDesktop {
                             this.agent_transcript =
                                 this.service.agent_transcript(thread_id).unwrap_or_default();
                         }
+                        this.agent_scroll_handle.scroll_to_bottom();
                         this.status = Some(error.into());
                     }
                 }
@@ -1480,6 +1630,13 @@ impl IdeallDesktop {
         }
         let database_path = self.database_path.clone();
         let existing_thread_id = self.agent_thread_id.clone();
+        self.agent_transcript.push(AgentTranscriptMessage {
+            role: ModelRole::User,
+            content: prompt.clone(),
+        });
+        self.agent_prompt_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.agent_scroll_handle.scroll_to_bottom();
         let task = cx.background_executor().spawn(async move {
             let mut workspace =
                 LocalWorkspace::open(database_path).map_err(|error| (None, error.to_string()))?;
@@ -1513,7 +1670,7 @@ impl IdeallDesktop {
         self.status = Some("正在启动外部 ACP v1 Agent；权限请求默认拒绝……".into());
         cx.spawn_in(window, async move |view, cx| {
             let result = task.await;
-            let _ = view.update_in(cx, |this, window, cx| {
+            let _ = view.update_in(cx, |this, _window, cx| {
                 this.agent_in_progress = false;
                 match result {
                     Ok((thread_id, result)) => {
@@ -1522,8 +1679,7 @@ impl IdeallDesktop {
                             .service
                             .agent_transcript(&thread_id)
                             .unwrap_or_default();
-                        this.agent_prompt_input
-                            .update(cx, |input, cx| input.set_value("", window, cx));
+                        this.agent_scroll_handle.scroll_to_bottom();
                         this.status = Some(
                             format!(
                                 "ACP {}：{} 个工具事件，{} 个权限请求被拒绝",
@@ -1542,6 +1698,7 @@ impl IdeallDesktop {
                                 .agent_transcript(&thread_id)
                                 .unwrap_or_default();
                         }
+                        this.agent_scroll_handle.scroll_to_bottom();
                         this.status = Some(error.into());
                     }
                 }
@@ -1855,6 +2012,10 @@ impl IdeallDesktop {
             cx.notify();
             return;
         }
+        if self.editor.selected_kind == Some(NodeKind::Note) && self.editor.note_preview {
+            self.editor.note_preview = false;
+            self.editor.set_note_rich_inputs_read_only(false, cx);
+        }
         self.editor.find_visible = true;
         self.editor.replace_visible = replace;
         self.editor.find_input.update(cx, |input, cx| {
@@ -1867,6 +2028,22 @@ impl IdeallDesktop {
         self.editor.find_visible = false;
         self.editor.replace_visible = false;
         self.editor.find_cursor = 0;
+        cx.notify();
+    }
+
+    fn toggle_note_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.editor.selected_kind != Some(NodeKind::Note) {
+            return;
+        }
+        self.editor.note_preview = !self.editor.note_preview;
+        self.editor
+            .set_note_rich_inputs_read_only(self.editor.note_preview, cx);
+        if self.editor.note_preview {
+            self.status = Some("阅读视图 · 内容仍会自动保存到本机".into());
+        } else {
+            self.editor.focus_active_editor(window, cx);
+            self.status = Some("块编辑视图 · 输入 / 插入内容块".into());
+        }
         cx.notify();
     }
 
@@ -1889,10 +2066,18 @@ impl IdeallDesktop {
             return;
         };
         self.editor.find_cursor = offset + query.len();
-        let position = position_for_byte_offset(&text, offset);
-        self.editor.active_input().update(cx, |input, cx| {
-            input.set_cursor_position(position, window, cx)
-        });
+        let position =
+            if self.editor.selected_kind == Some(NodeKind::Note) && self.editor.has_note_blocks() {
+                self.editor
+                    .focus_note_match(offset, window, cx)
+                    .unwrap_or_else(|| position_for_byte_offset(&text, offset))
+            } else {
+                let position = position_for_byte_offset(&text, offset);
+                self.editor.active_input().update(cx, |input, cx| {
+                    input.set_cursor_position(position, window, cx)
+                });
+                position
+            };
         self.status = Some(format!("第 {} 行找到匹配项", position.line.saturating_add(1)).into());
         cx.notify();
     }
@@ -1911,24 +2096,32 @@ impl IdeallDesktop {
         }
         let replacement = self.editor.replace_input.read(cx).value().to_string();
         let text = self.editor.active_text(cx);
-        let count = text.match_indices(&query).count();
+        let count =
+            if self.editor.selected_kind == Some(NodeKind::Note) && self.editor.has_note_blocks() {
+                self.editor
+                    .replace_all_note_blocks(&query, &replacement, window, cx)
+            } else {
+                text.match_indices(&query).count()
+            };
         if count == 0 {
             self.status = Some("当前文件中没有匹配项".into());
             cx.notify();
             return;
         }
-        let replaced = text.replace(&query, &replacement);
-        self.editor.suppress_events = true;
-        if self.editor.active_engine_id.as_deref() == Some("ideall.text") {
-            self.editor
-                .text_input
-                .update(cx, |input, cx| input.set_value(replaced, window, cx));
-        } else {
-            self.editor
-                .body_input
-                .update(cx, |input, cx| input.set_value(replaced, window, cx));
+        if self.editor.selected_kind != Some(NodeKind::Note) || !self.editor.has_note_blocks() {
+            let replaced = text.replace(&query, &replacement);
+            self.editor.suppress_events = true;
+            if self.editor.uses_text_input() {
+                self.editor
+                    .text_input
+                    .update(cx, |input, cx| input.set_value(replaced, window, cx));
+            } else {
+                self.editor
+                    .body_input
+                    .update(cx, |input, cx| input.set_value(replaced, window, cx));
+            }
+            self.editor.suppress_events = false;
         }
-        self.editor.suppress_events = false;
         self.editor.find_cursor = 0;
         self.mark_editor_dirty(cx);
         self.status = Some(format!("已替换 {count} 处，等待自动保存").into());
@@ -2122,6 +2315,7 @@ impl IdeallDesktop {
                 return;
             }
         }
+        let previous_tab_id = self.editor.workspace.active_id.clone();
         let Some(id) = self.editor.selected_id.clone() else {
             return;
         };
@@ -2148,6 +2342,13 @@ impl IdeallDesktop {
         match result {
             Ok(()) => {
                 self.open_node(id, window, cx);
+                if let (Some(previous_tab_id), Some(active_tab_id)) =
+                    (previous_tab_id, self.editor.workspace.active_id.as_deref())
+                    && previous_tab_id != active_tab_id
+                {
+                    self.editor.workspace.close(&previous_tab_id);
+                    self.persist_workspace();
+                }
                 self.status = Some(format!("默认使用 {engine_id}").into());
             }
             Err(error) => self.status = Some(error.to_string().into()),

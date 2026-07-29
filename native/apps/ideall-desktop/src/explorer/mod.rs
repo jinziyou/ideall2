@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 mod view;
 
-pub(crate) use view::{DraggedNode, kind_color, kind_icon};
+pub(crate) use view::DraggedNode;
 
 /// UI-only project explorer state, independent from the active editor.
 pub(super) struct ExplorerState {

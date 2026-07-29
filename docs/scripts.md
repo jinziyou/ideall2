@@ -20,6 +20,7 @@
 | --- | --- |
 | `pnpm lint:actions` | 校验 GitHub Actions |
 | `pnpm lint:docs` | 校验 Markdown 相对链接 |
+| `pnpm audit:dependencies` | 使用当前 pnpm 锁文件检查 npm 安全公告 |
 | `pnpm version:check` | 校验 Cargo 与平台包版本 |
 | `pnpm test:scripts` | 隔离运行 `scripts/*.test.mjs` |
 | `pnpm verify:checks` | 运行格式、文档、Actions、版本与脚本门禁 |
@@ -40,3 +41,5 @@ pnpm test:scripts -- native-mobile
 
 生产发布流程见 [native/RELEASE.md](../native/RELEASE.md)。旧 Web/Tauri 的构建、静态导出、
 Playwright 冒烟和 OpenAPI TypeScript codegen 只保留在 `legacy/tauri-v2` 分支。
+`scripts/dependency-policy.test.mjs` 会阻止生产 npm 依赖、旧前端运行时及其传递锁文件
+重新进入默认分支。

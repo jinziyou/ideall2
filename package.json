@@ -15,6 +15,7 @@
     "app:build": "pnpm native:build:desktop",
     "lint:actions": "node scripts/lint-actions.mjs",
     "lint:docs": "node scripts/check-docs.mjs",
+    "audit:dependencies": "pnpm audit --audit-level=high",
     "native:check": "cd native && cargo check --locked --workspace --all-targets && cargo check --locked -p ideall-mobile --features mobile-ui-host-check",
     "native:test": "cd native && cargo test --locked --workspace",
     "native:lint": "cd native && cargo fmt --all -- --check && cargo clippy --locked --workspace --all-targets --exclude ideall-mobile -- -D warnings && cargo clippy --locked -p ideall-mobile --features mobile-ui-host-check -- -D warnings",

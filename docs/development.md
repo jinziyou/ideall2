@@ -61,6 +61,8 @@ protocol → domain → application → adapters → UI → platform app
 - desktop 与 mobile 分别使用经过验证的 GPUI revision，不直接共享 UI 类型。
 - UI 通过 application service 修改数据，不能直接访问 SQLite。
 - Agent 数据访问必须经过 Grant → MCP/FileSystem。
+- 根 `package.json` 只允许仓库维护工具，不得添加产品运行时 npm 依赖；依赖策略由
+  `scripts/dependency-policy.test.mjs` 和冻结的 `pnpm-lock.yaml` 共同守卫。
 
 新增依赖时优先放在最窄的 crate；GPUI Git/revision 变更应单独提交，并运行全平台构建矩阵。
 

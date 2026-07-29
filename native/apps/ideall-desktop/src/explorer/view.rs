@@ -21,25 +21,3 @@ impl Render for DraggedNode {
             .child(self.title.clone())
     }
 }
-
-pub(crate) fn kind_icon(kind: NodeKind) -> &'static str {
-    match kind {
-        NodeKind::Folder => "◆",
-        NodeKind::Note => "N",
-        NodeKind::Bookmark => "↗",
-        NodeKind::File => "F",
-        NodeKind::Feed => "◎",
-        NodeKind::Thread => "#",
-    }
-}
-
-pub(crate) fn kind_color(kind: NodeKind) -> u32 {
-    match kind {
-        NodeKind::Folder => 0xb47b18,
-        NodeKind::Note => 0x3574f0,
-        NodeKind::Bookmark => 0x478c6c,
-        NodeKind::File => 0x7656c9,
-        NodeKind::Feed => 0xc76834,
-        NodeKind::Thread => 0x9b4f78,
-    }
-}

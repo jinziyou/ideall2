@@ -16,6 +16,7 @@ actions!(
         SelectAppsSection,
         SelectSettingsSection,
         NewTextFile,
+        NewBookmark,
         NewFolder,
         ImportFiles,
         FindInEditor,
@@ -31,7 +32,9 @@ actions!(
         FormatNoteCode,
         MoveNoteBlockUp,
         MoveNoteBlockDown,
-        DuplicateNoteBlock
+        DuplicateNoteBlock,
+        CopyNoteBlocks,
+        DeleteNoteBlocks
     ]
 );
 
@@ -81,6 +84,10 @@ pub(super) fn init(cx: &mut App) {
         KeyBinding::new("ctrl-alt-down", MoveNoteBlockDown, Some(CONTEXT)),
         KeyBinding::new("cmd-shift-d", DuplicateNoteBlock, Some(CONTEXT)),
         KeyBinding::new("ctrl-shift-d", DuplicateNoteBlock, Some(CONTEXT)),
+        KeyBinding::new("cmd-shift-c", CopyNoteBlocks, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-c", CopyNoteBlocks, Some(CONTEXT)),
+        KeyBinding::new("cmd-shift-backspace", DeleteNoteBlocks, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-backspace", DeleteNoteBlocks, Some(CONTEXT)),
     ]);
 }
 
@@ -91,8 +98,13 @@ impl IdeallDesktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.explorer.panel_visible {
+            self.explorer.panel_visible = true;
+            self.persist_workspace();
+        }
         self.search_input
             .update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
     }
 
     pub(super) fn create_note_from_shortcut(
@@ -210,6 +222,18 @@ impl IdeallDesktop {
         self.create_text_file(window, cx);
     }
 
+    pub(super) fn create_bookmark_from_shortcut(
+        &mut self,
+        _: &NewBookmark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(self.active_section.as_ref(), "我的" | "浏览") {
+            self.select_section("浏览", window, cx);
+        }
+        self.create_bookmark(window, cx);
+    }
+
     pub(super) fn create_folder_from_tree(
         &mut self,
         _: &NewFolder,
@@ -258,6 +282,9 @@ impl IdeallDesktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.editor.link_editor.is_some() {
+            return;
+        }
         self.open_selected_explorer_node(window, cx);
     }
 
@@ -373,6 +400,28 @@ impl IdeallDesktop {
     ) {
         if self.note_editor_focused(window, cx) {
             self.duplicate_current_note_block(window, cx);
+        }
+    }
+
+    pub(super) fn copy_note_blocks_from_shortcut(
+        &mut self,
+        _: &CopyNoteBlocks,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.note_editor_focused(window, cx) {
+            self.copy_selected_note_blocks(cx);
+        }
+    }
+
+    pub(super) fn delete_note_blocks_from_shortcut(
+        &mut self,
+        _: &DeleteNoteBlocks,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.note_editor_focused(window, cx) {
+            self.delete_current_note_block(window, cx);
         }
     }
 }

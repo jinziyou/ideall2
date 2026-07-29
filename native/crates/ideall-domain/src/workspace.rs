@@ -41,6 +41,8 @@ pub struct WorkspaceState {
     pub active_id: Option<String>,
     #[serde(default)]
     pub explorer: ExplorerLayoutState,
+    #[serde(default)]
+    pub agent: AgentPanelState,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -61,6 +63,19 @@ impl Default for ExplorerLayoutState {
             expanded_folders: Vec::new(),
             visible: true,
         }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPanelState {
+    #[serde(default = "default_true")]
+    pub visible: bool,
+}
+
+impl Default for AgentPanelState {
+    fn default() -> Self {
+        Self { visible: true }
     }
 }
 
@@ -248,6 +263,8 @@ mod tests {
         assert_eq!(state.explorer, ExplorerLayoutState::default());
         assert_eq!(state.explorer.width, 272);
         assert!(state.explorer.visible);
+        assert_eq!(state.agent, AgentPanelState::default());
+        assert!(state.agent.visible);
     }
 
     #[test]

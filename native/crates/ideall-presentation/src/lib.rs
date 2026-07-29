@@ -35,24 +35,24 @@ pub mod color {
 
     /// Desktop-only light palette for the compact, AI-native workbench.
     pub mod desktop {
-        pub const CANVAS: u32 = 0xf2f4f2;
+        pub const CANVAS: u32 = 0xf3f5f2;
         pub const SURFACE: u32 = 0xffffff;
-        pub const SURFACE_MUTED: u32 = 0xf6f7f5;
+        pub const SURFACE_MUTED: u32 = 0xf8faf8;
         pub const SURFACE_RAISED: u32 = 0xffffff;
         pub const INK: u32 = 0x1c211e;
-        pub const INK_MUTED: u32 = 0x626a65;
+        pub const INK_MUTED: u32 = 0x69716c;
         pub const INK_FAINT: u32 = 0x929a95;
-        pub const BORDER: u32 = 0xe1e5e2;
-        pub const BORDER_STRONG: u32 = 0xcbd1cd;
+        pub const BORDER: u32 = 0xe3e7e4;
+        pub const BORDER_STRONG: u32 = 0xcdd4cf;
         pub const ACCENT: u32 = 0x16825d;
         pub const ACCENT_HOVER: u32 = 0x126f50;
         pub const ACCENT_ACTIVE: u32 = 0x0e5d43;
         pub const ACCENT_SOFT: u32 = 0xe4f3eb;
-        pub const ACCENT_ON_RAIL: u32 = 0x72e3aa;
-        pub const RAIL: u32 = 0x181b19;
-        pub const RAIL_MUTED: u32 = 0x939c96;
-        pub const RAIL_ACTIVE: u32 = 0x2b302d;
-        pub const RAIL_INK: u32 = 0xf5f8f6;
+        pub const ACCENT_ON_RAIL: u32 = ACCENT;
+        pub const RAIL: u32 = 0xf7f9f6;
+        pub const RAIL_MUTED: u32 = 0x6f7973;
+        pub const RAIL_ACTIVE: u32 = ACCENT_SOFT;
+        pub const RAIL_INK: u32 = INK;
         pub const DANGER: u32 = 0xb84943;
         pub const DANGER_BORDER: u32 = 0xddb7b3;
         pub const WARNING_SOFT: u32 = 0xfff3d6;
@@ -77,7 +77,7 @@ pub struct NavigationItem {
 pub const NAVIGATION: [NavigationItem; 5] = [
     NavigationItem {
         section: "我的",
-        label: "项目",
+        label: "工作台",
         icon: "▤",
         shortcut: "Alt 1",
     },
@@ -95,7 +95,7 @@ pub const NAVIGATION: [NavigationItem; 5] = [
     },
     NavigationItem {
         section: "应用",
-        label: "应用",
+        label: "Agent",
         icon: "✦",
         shortcut: "Alt 4",
     },

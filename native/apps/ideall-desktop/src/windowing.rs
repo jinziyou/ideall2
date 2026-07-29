@@ -44,8 +44,9 @@ pub(super) fn desktop_window_options(cx: &App) -> WindowOptions {
     WindowOptions {
         window_bounds: Some(window_bounds),
         titlebar: Some(TitlebarOptions {
-            title: Some("ideall · 本地信息终端".into()),
-            ..Default::default()
+            title: (!cfg!(target_os = "macos")).then(|| "ideall · 本地信息终端".into()),
+            appears_transparent: cfg!(target_os = "macos"),
+            traffic_light_position: cfg!(target_os = "macos").then(|| point(px(18.0), px(24.0))),
         }),
         display_id,
         window_min_size: Some(window_min_size),

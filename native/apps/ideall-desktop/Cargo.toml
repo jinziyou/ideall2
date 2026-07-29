@@ -22,6 +22,7 @@ ideall-sync = { path = "../../crates/ideall-sync" }
 ideall-sync-http = { path = "../../crates/ideall-sync-http" }
 ideall-updater = { path = "../../crates/ideall-updater" }
 url.workspace = true
+unicode-segmentation.workspace = true
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 gpui-component = { version = "=0.5.1", features = ["webview"] }

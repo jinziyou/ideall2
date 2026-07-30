@@ -12,7 +12,7 @@ use std::{
 };
 
 use agent_client_protocol::schema::{ProtocolVersion, v1::*};
-use agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
+use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo};
 use agent_client_protocol::{on_receive_notification, on_receive_request};
 use futures::future::{Either, select};
 use thiserror::Error;
@@ -159,10 +159,7 @@ async fn run_external_acp_async(
     let state = std::sync::Arc::new(std::sync::Mutex::new(RunState::default()));
     let notification_state = state.clone();
     let permission_state = state.clone();
-    let server = McpServer::Stdio(
-        McpServerStdio::new("ideall-external-agent", config.program).args(config.args),
-    );
-    let agent = AcpAgent::new(server);
+    let agent = AcpAgent::new(AcpAgentConfig::new(config.program).args(config.args));
     let stop_reason = Client
         .builder()
         .name("ideall")

@@ -228,7 +228,7 @@ fn write_verified_artifact(
             .write_all(&buffer[..read])
             .map_err(|_| UpdateError::Destination)?;
     }
-    if total != artifact.size || format!("{:x}", hasher.finalize()) != artifact.sha256 {
+    if total != artifact.size || hex_lower(&hasher.finalize()) != artifact.sha256 {
         return Err(UpdateError::ArtifactMismatch);
     }
     temporary
@@ -455,7 +455,16 @@ fn file_matches(path: &Path, artifact: &UpdateArtifact) -> Result<bool, UpdateEr
         }
         hasher.update(&buffer[..read]);
     }
-    Ok(format!("{:x}", hasher.finalize()) == artifact.sha256)
+    Ok(hex_lower(&hasher.finalize()) == artifact.sha256)
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut result = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        write!(&mut result, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    result
 }
 
 #[cfg(test)]
@@ -556,7 +565,7 @@ mod tests {
             file: "ideall.deb".into(),
             url: "https://example.com/ideall.deb".into(),
             size: bytes.len() as u64,
-            sha256: format!("{:x}", Sha256::digest(bytes)),
+            sha256: hex_lower(&Sha256::digest(bytes)),
         };
         let path = write_verified_artifact(bytes.as_slice(), &artifact, directory.path()).unwrap();
         assert_eq!(fs::read(path).unwrap(), bytes);

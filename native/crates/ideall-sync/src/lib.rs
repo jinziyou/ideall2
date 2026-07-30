@@ -211,8 +211,12 @@ impl DerivedKeys {
         }
         let cipher = Aes256Gcm::new_from_slice(&self.encryption_key)
             .map_err(|_| SyncCryptoError::Authentication)?;
+        let nonce = iv
+            .as_slice()
+            .try_into()
+            .map_err(|_| SyncCryptoError::MalformedCiphertext)?;
         cipher
-            .decrypt(iv.as_slice().into(), ciphertext.as_slice())
+            .decrypt(nonce, ciphertext.as_slice())
             .map_err(|_| SyncCryptoError::Authentication)
     }
 

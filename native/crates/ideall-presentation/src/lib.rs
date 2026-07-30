@@ -35,19 +35,19 @@ pub mod color {
 
     /// Desktop-only light palette for the compact, AI-native workbench.
     pub mod desktop {
-        pub const CANVAS: u32 = 0xf3f5f2;
+        pub const CANVAS: u32 = 0xf4f6f4;
         pub const SURFACE: u32 = 0xffffff;
         pub const SURFACE_MUTED: u32 = 0xf8faf8;
         pub const SURFACE_RAISED: u32 = 0xffffff;
-        pub const INK: u32 = 0x1c211e;
-        pub const INK_MUTED: u32 = 0x69716c;
-        pub const INK_FAINT: u32 = 0x929a95;
-        pub const BORDER: u32 = 0xe3e7e4;
+        pub const INK: u32 = 0x1b211e;
+        pub const INK_MUTED: u32 = 0x6a726d;
+        pub const INK_FAINT: u32 = 0x9aa29c;
+        pub const BORDER: u32 = 0xe4e8e5;
         pub const BORDER_STRONG: u32 = 0xcdd4cf;
         pub const ACCENT: u32 = 0x16825d;
         pub const ACCENT_HOVER: u32 = 0x126f50;
         pub const ACCENT_ACTIVE: u32 = 0x0e5d43;
-        pub const ACCENT_SOFT: u32 = 0xe4f3eb;
+        pub const ACCENT_SOFT: u32 = 0xe6f4ec;
         pub const ACCENT_ON_RAIL: u32 = ACCENT;
         pub const RAIL: u32 = 0xf7f9f6;
         pub const RAIL_MUTED: u32 = 0x6f7973;
@@ -61,7 +61,7 @@ pub mod color {
         pub const EDITOR: u32 = 0xffffff;
         pub const EDITOR_GUTTER: u32 = 0xf7f8f6;
         pub const HOVER: u32 = 0xeff2f0;
-        pub const SELECTION: u32 = 0xdaf0e4;
+        pub const SELECTION: u32 = 0xddf0e5;
         pub const STATUS_BAR: u32 = CANVAS;
     }
 }

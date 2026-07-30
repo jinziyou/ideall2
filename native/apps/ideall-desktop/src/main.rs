@@ -2489,7 +2489,7 @@ fn configure_desktop_theme(cx: &mut App) {
     theme.secondary_foreground = rgb(INK).into();
     theme.border = rgb(BORDER).into();
     theme.input = rgb(BORDER_STRONG).into();
-    theme.radius = px(7.0);
+    theme.radius = px(8.0);
     theme.radius_lg = px(10.0);
     theme.shadow = false;
 }

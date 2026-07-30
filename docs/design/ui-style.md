@@ -30,17 +30,17 @@
 
 | Token | 当前值 | 用途 |
 | --- | --- | --- |
-| `CANVAS` | `#f3f5f2` | 窗口底色与页面留白 |
+| `CANVAS` | `#f4f6f4` | 窗口底色与页面留白 |
 | `SURFACE` / `EDITOR` | `#ffffff` | 面板、主内容与编辑器 |
 | `SURFACE_MUTED` / `TOOLBAR` | `#f8faf8` | 工具条、资料库和 Agent 背景 |
 | `EDITOR_GUTTER` | `#f7f8f6` | 编辑器次级区域 |
-| `INK` | `#1c211e` | 主文本 |
-| `INK_MUTED` | `#69716c` | 次级文本 |
-| `INK_FAINT` | `#929a95` | 元信息与占位 |
-| `BORDER` | `#e3e7e4` | 常规分隔 |
+| `INK` | `#1b211e` | 主文本 |
+| `INK_MUTED` | `#6a726d` | 次级文本 |
+| `INK_FAINT` | `#9aa29c` | 元信息与占位 |
+| `BORDER` | `#e4e8e5` | 常规分隔 |
 | `BORDER_STRONG` | `#cdd4cf` | 活动边界与拖拽 |
 | `ACCENT` | `#16825d` | 当前项、焦点和主操作 |
-| `ACCENT_SOFT` / `SELECTION` | `#e4f3eb` / `#daf0e4` | 轻量选中背景 |
+| `ACCENT_SOFT` / `SELECTION` | `#e6f4ec` / `#ddf0e5` | 轻量选中背景 |
 | `RAIL` / `ACCENT_ON_RAIL` | `#f7f9f6` / `#16825d` | 浅色纵向导航和当前项 |
 | `HOVER` | `#eff2f0` | 悬停反馈 |
 

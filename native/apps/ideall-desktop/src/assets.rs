@@ -8,24 +8,28 @@ pub(super) struct IdeallAssets;
 #[derive(Clone, Copy)]
 pub(super) enum IdeallIcon {
     Brand,
+    ShieldCheck,
+    Wrench,
 }
 
 impl IconNamed for IdeallIcon {
     fn path(self) -> SharedString {
         match self {
             Self::Brand => "icons/brand.svg",
+            Self::ShieldCheck => "icons/shield-check.svg",
+            Self::Wrench => "icons/wrench.svg",
         }
         .into()
     }
 }
 
-const ICON_PATHS: [&str; 27] = [
+const ICON_PATHS: [&str; 29] = [
     "icons/arrow-left.svg",
     "icons/arrow-right.svg",
     "icons/arrow-up.svg",
     "icons/book-open.svg",
-    "icons/brand.svg",
     "icons/bot.svg",
+    "icons/brand.svg",
     "icons/calendar.svg",
     "icons/chevron-down.svg",
     "icons/chevron-right.svg",
@@ -47,6 +51,8 @@ const ICON_PATHS: [&str; 27] = [
     "icons/redo.svg",
     "icons/search.svg",
     "icons/settings-2.svg",
+    "icons/shield-check.svg",
+    "icons/wrench.svg",
 ];
 
 impl AssetSource for IdeallAssets {
@@ -87,6 +93,8 @@ impl AssetSource for IdeallAssets {
             "icons/redo.svg" => Some(include_bytes!("../assets/icons/redo.svg")),
             "icons/search.svg" => Some(include_bytes!("../assets/icons/search.svg")),
             "icons/settings-2.svg" => Some(include_bytes!("../assets/icons/settings-2.svg")),
+            "icons/shield-check.svg" => Some(include_bytes!("../assets/icons/shield-check.svg")),
+            "icons/wrench.svg" => Some(include_bytes!("../assets/icons/wrench.svg")),
             _ => None,
         };
         Ok(bytes.map(Cow::Borrowed))
@@ -150,5 +158,8 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+        for icon in [IdeallIcon::ShieldCheck, IdeallIcon::Wrench] {
+            assert!(IdeallAssets.load(icon.path().as_ref()).unwrap().is_some());
+        }
     }
 }

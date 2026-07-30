@@ -79,6 +79,8 @@ fn note_block_style_dropdown(
         .label(label)
         .tooltip("转换当前内容块")
         .small()
+        .h(px(28.0))
+        .rounded_full()
         .ghost()
         .disabled(selected_count > 1 || current.is_none())
         .dropdown_caret(true)
@@ -132,8 +134,13 @@ fn note_color_dropdown(
             "背景高亮"
         })
         .xsmall()
+        .h(px(28.0))
+        .rounded(px(6.0))
         .ghost()
         .selected(selected.is_some())
+        .when(selected.is_some(), |button| {
+            button.bg(rgb(ACCENT_SOFT)).text_color(rgb(ACCENT))
+        })
         .disabled(disabled)
         .dropdown_caret(true)
         .dropdown_menu(move |menu, _, _| {
@@ -1277,15 +1284,22 @@ impl IdeallDesktop {
                             Button::new(id)
                                 .label(label)
                                 .tooltip(tooltip)
-                                .xsmall()
+                                .w(px(28.0))
+                                .h(px(28.0))
+                                .p_0()
+                                .rounded(px(6.0))
                                 .ghost()
                                 .selected(selected)
+                                .when(selected, |button| {
+                                    button.bg(rgb(ACCENT_SOFT)).text_color(rgb(ACCENT))
+                                })
                                 .disabled(multiple_selected)
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.format_note_inline(style, window, cx);
                                 }))
                         }),
                     )
+                    .child(div().w(px(1.0)).h(px(20.0)).mx_1().bg(rgb(BORDER)))
                     .child(note_color_dropdown(
                         "note-inline-text-color",
                         true,
@@ -1306,7 +1320,10 @@ impl IdeallDesktop {
                             Button::new("note-todo-toggle")
                                 .label("✓")
                                 .tooltip("切换待办完成状态")
-                                .xsmall()
+                                .w(px(28.0))
+                                .h(px(28.0))
+                                .p_0()
+                                .rounded(px(6.0))
                                 .ghost()
                                 .disabled(multiple_selected)
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -1320,7 +1337,10 @@ impl IdeallDesktop {
                                 Button::new("note-indent-out")
                                     .label("←")
                                     .tooltip("减少列表层级")
-                                    .xsmall()
+                                    .w(px(28.0))
+                                    .h(px(28.0))
+                                    .p_0()
+                                    .rounded(px(6.0))
                                     .ghost()
                                     .disabled(multiple_selected)
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -1335,7 +1355,10 @@ impl IdeallDesktop {
                                 Button::new("note-indent-in")
                                     .label("→")
                                     .tooltip("增加列表层级")
-                                    .xsmall()
+                                    .w(px(28.0))
+                                    .h(px(28.0))
+                                    .p_0()
+                                    .rounded(px(6.0))
                                     .ghost()
                                     .disabled(multiple_selected)
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -1347,11 +1370,15 @@ impl IdeallDesktop {
                                     })),
                             )
                     })
+                    .child(div().w(px(1.0)).h(px(20.0)).mx_1().bg(rgb(BORDER)))
                     .child(
                         Button::new("note-block-more")
                             .label("•••")
                             .tooltip("更多块操作")
-                            .xsmall()
+                            .w(px(28.0))
+                            .h(px(28.0))
+                            .p_0()
+                            .rounded(px(6.0))
                             .ghost()
                             .dropdown_menu(|menu, _, _| {
                                 menu.label("块操作")

@@ -39,7 +39,7 @@ futures = "0.3.32"
 hkdf = "0.12"
 keyring = "=4.1.5"
 minisign = "=0.9.1"
-pbkdf2 = "0.12"
+pbkdf2 = "0.13"
 percent-encoding = "2.3"
 rusqlite = { version = "0.38", features = ["bundled"] }
 semver = { version = "1.0", features = ["serde"] }

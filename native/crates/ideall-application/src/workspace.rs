@@ -113,6 +113,8 @@ pub struct NodeSummary {
     pub updated_at: i64,
     pub deleted: bool,
     pub depth: usize,
+    /// 全文搜索命中摘要（含 «» 高亮标记）；非搜索列表为空串。
+    pub snippet: String,
 }
 
 impl From<&Node> for NodeSummary {
@@ -125,6 +127,7 @@ impl From<&Node> for NodeSummary {
             updated_at: node.base().updated_at,
             deleted: node.base().deleted_at.is_some(),
             depth: 0,
+            snippet: String::new(),
         }
     }
 }
@@ -139,6 +142,7 @@ impl From<&NodeProjection> for NodeSummary {
             updated_at: node.updated_at,
             deleted: node.deleted,
             depth: 0,
+            snippet: String::new(),
         }
     }
 }
@@ -281,11 +285,24 @@ impl LocalWorkspace {
     }
 
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<NodeSummary>, ApplicationError> {
+        self.search_with_kind(query, limit, None)
+    }
+
+    pub fn search_with_kind(
+        &self,
+        query: &str,
+        limit: usize,
+        kind: Option<NodeKind>,
+    ) -> Result<Vec<NodeSummary>, ApplicationError> {
         Ok(self
             .database
-            .search_nodes(query, limit)?
-            .iter()
-            .map(NodeSummary::from)
+            .search_nodes(query, limit, kind)?
+            .into_iter()
+            .map(|hit| {
+                let mut summary = NodeSummary::from(&hit.node);
+                summary.snippet = hit.snippet;
+                summary
+            })
             .collect())
     }
 
@@ -2955,6 +2972,38 @@ mod tests {
             workspace.apply_bookmark_metadata(&note.base().id, &bookmark_metadata()),
             Err(ApplicationError::WrongKind { .. })
         ));
+    }
+
+    #[test]
+    fn search_with_kind_carries_snippet_filters_kind_and_stays_openable() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        let note = workspace.create_note(None, "流水线笔记").unwrap();
+        workspace
+            .update_plain_note(&note.base().id, "流水线作业可以提升发布效率")
+            .unwrap();
+        let bookmark = workspace
+            .create_bookmark(None, "流水线书签", "https://example.com/")
+            .unwrap();
+
+        let notes = workspace
+            .search_with_kind("流水线", 20, Some(NodeKind::Note))
+            .unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].id, note.base().id);
+        assert!(notes[0].snippet.contains("流水线"));
+
+        let bookmarks = workspace
+            .search_with_kind("流水线", 20, Some(NodeKind::Bookmark))
+            .unwrap();
+        assert_eq!(bookmarks.len(), 1);
+        assert_eq!(bookmarks[0].id, bookmark.base().id);
+
+        // 原对象跳转：搜索命中的 id 可直接打开对应节点。
+        let all = workspace.search("流水线", 20).unwrap();
+        assert_eq!(all.len(), 2);
+        for hit in &all {
+            assert_eq!(workspace.node(&hit.id).unwrap().kind(), hit.kind);
+        }
     }
 
     #[test]

@@ -129,6 +129,7 @@ struct IdeallDesktop {
     show_trash: bool,
     inbox_count: usize,
     search_query: String,
+    search_kind: Option<NodeKind>,
     mentionable_notes: Vec<NodeSummary>,
     note_backlinks: Vec<NodeSummary>,
     search_requests: LatestRequest,
@@ -401,6 +402,7 @@ impl IdeallDesktop {
             show_trash: false,
             inbox_count: 0,
             search_query: String::new(),
+            search_kind: None,
             mentionable_notes,
             note_backlinks: Vec::new(),
             search_requests: LatestRequest::default(),
@@ -494,7 +496,8 @@ impl IdeallDesktop {
         } else if self.active_section.as_ref() == "收集箱" {
             self.service.list_children(INBOX_ROOT_ID)
         } else if !self.search_query.trim().is_empty() {
-            self.service.search(&self.search_query, 200)
+            self.service
+                .search_with_kind(&self.search_query, 200, self.search_kind)
         } else {
             self.service.list_home().map(|mut items| {
                 match self.active_section.as_ref() {
@@ -551,6 +554,7 @@ impl IdeallDesktop {
         self.active_section = "搜索".into();
         self.status = Some("正在搜索本地内容…".into());
         let database_path = self.database_path.clone();
+        let search_kind = self.search_kind;
         let timer = cx.background_executor().timer(SEARCH_DEBOUNCE_DELAY);
         self.search_task = Some(cx.spawn(async move |view, cx| {
             timer.await;
@@ -559,7 +563,7 @@ impl IdeallDesktop {
                 let workspace =
                     LocalWorkspace::open(database_path).map_err(|error| error.to_string())?;
                 workspace
-                    .search(&query_for_search, 200)
+                    .search_with_kind(&query_for_search, 200, search_kind)
                     .map_err(|error| error.to_string())
             });
             let result = search.await;
@@ -588,6 +592,17 @@ impl IdeallDesktop {
             });
         }));
         cx.notify();
+    }
+
+    /// 切换搜索类型过滤并立即用当前查询重发搜索（复用同一防抖）。
+    fn set_search_kind(&mut self, kind: Option<NodeKind>, cx: &mut Context<Self>) {
+        self.search_kind = kind;
+        if !self.search_query.trim().is_empty() {
+            let query = self.search_query.clone();
+            self.schedule_search(query, cx);
+        } else {
+            cx.notify();
+        }
     }
 
     fn create_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {

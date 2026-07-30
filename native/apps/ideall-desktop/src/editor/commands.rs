@@ -1481,6 +1481,7 @@ mod tests {
             updated_at: 0,
             deleted: false,
             depth: 0,
+            snippet: String::new(),
         };
         let items = vec![
             item("current", "Project current"),

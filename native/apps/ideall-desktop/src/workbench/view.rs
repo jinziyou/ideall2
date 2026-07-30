@@ -1695,6 +1695,35 @@ impl IdeallDesktop {
                                 )
                             }),
                     )
+                    .when(section == "搜索" && !items.is_empty(), |content| {
+                        let current = self.search_kind;
+                        content.child(div().flex().flex_wrap().gap_2().children(
+                            SEARCH_KIND_CHIPS.iter().map(|(key, kind, label)| {
+                                let active = current == *kind;
+                                let kind = *kind;
+                                div()
+                                    .id(SharedString::from(format!("search-kind-{key}")))
+                                    .h(px(26.0))
+                                    .px_3()
+                                    .rounded_full()
+                                    .flex()
+                                    .items_center()
+                                    .cursor_pointer()
+                                    .text_size(px(12.0))
+                                    .when(active, |chip| {
+                                        chip.bg(rgb(ACCENT_SOFT)).text_color(rgb(ACCENT))
+                                    })
+                                    .when(!active, |chip| {
+                                        chip.text_color(rgb(INK_MUTED))
+                                            .hover(|style| style.bg(rgb(HOVER)))
+                                    })
+                                    .child(*label)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.set_search_kind(kind, cx);
+                                    }))
+                            }),
+                        ))
+                    })
                     .when(items.is_empty(), |content| {
                         content.child(
                             div()
@@ -1709,12 +1738,16 @@ impl IdeallDesktop {
                         let id = item.id.clone();
                         let is_folder = item.kind == NodeKind::Folder;
                         let is_trash = section == "回收站";
+                        let snippet = item.snippet.clone();
+                        let show_snippet = section == "搜索" && !snippet.is_empty();
                         div()
                             .id(SharedString::from(format!("collection-item-{}", item.id)))
-                            .h(px(48.0))
+                            .when(!show_snippet, |row| row.h(px(48.0)))
+                            .when(show_snippet, |row| row.py_2())
                             .flex()
-                            .items_center()
-                            .gap_3()
+                            .flex_col()
+                            .justify_center()
+                            .gap_1()
                             .px_3()
                             .rounded_md()
                             .border_1()
@@ -1733,30 +1766,39 @@ impl IdeallDesktop {
                                 }
                             }))
                             .child(
-                                Icon::new(node_kind_icon(item.kind, false))
-                                    .size(px(17.0))
-                                    .text_color(rgb(INK_MUTED)),
-                            )
-                            .child(
                                 div()
-                                    .flex_1()
-                                    .overflow_hidden()
-                                    .text_ellipsis()
-                                    .whitespace_nowrap()
-                                    .text_sm()
-                                    .child(item.title),
+                                    .flex()
+                                    .items_center()
+                                    .gap_3()
+                                    .child(
+                                        Icon::new(node_kind_icon(item.kind, false))
+                                            .size(px(17.0))
+                                            .text_color(rgb(INK_MUTED)),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .overflow_hidden()
+                                            .text_ellipsis()
+                                            .whitespace_nowrap()
+                                            .text_sm()
+                                            .child(item.title),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(rgb(INK_FAINT))
+                                            .child(node_kind_label(item.kind)),
+                                    )
+                                    .child(
+                                        Icon::new(IconName::ChevronRight)
+                                            .size(px(14.0))
+                                            .text_color(rgb(INK_FAINT)),
+                                    ),
                             )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(rgb(INK_FAINT))
-                                    .child(node_kind_label(item.kind)),
-                            )
-                            .child(
-                                Icon::new(IconName::ChevronRight)
-                                    .size(px(14.0))
-                                    .text_color(rgb(INK_FAINT)),
-                            )
+                            .when(show_snippet, |row| {
+                                row.child(render_search_snippet(&snippet))
+                            })
                     })),
             )
             .into_any_element()
@@ -3030,6 +3072,52 @@ fn node_kind_label(kind: NodeKind) -> &'static str {
         NodeKind::Feed => "关注源",
         NodeKind::Thread => "对话",
     }
+}
+
+const SEARCH_KIND_CHIPS: [(&str, Option<NodeKind>, &str); 6] = [
+    ("all", None, "全部"),
+    ("note", Some(NodeKind::Note), "笔记"),
+    ("bookmark", Some(NodeKind::Bookmark), "书签"),
+    ("file", Some(NodeKind::File), "文件"),
+    ("feed", Some(NodeKind::Feed), "关注源"),
+    ("thread", Some(NodeKind::Thread), "对话"),
+];
+
+/// 把 FTS 摘要按 « » 切分为 spans：标记内文本用 ACCENT 加粗，不显示标记原文。
+fn render_search_snippet(snippet: &str) -> gpui::AnyElement {
+    let mut spans = Vec::new();
+    let mut rest = snippet;
+    while let Some(start) = rest.find('«') {
+        if !rest[..start].is_empty() {
+            spans.push((rest[..start].to_owned(), false));
+        }
+        rest = &rest[start + '«'.len_utf8()..];
+        let Some(end) = rest.find('»') else {
+            break;
+        };
+        spans.push((rest[..end].to_owned(), true));
+        rest = &rest[end + '»'.len_utf8()..];
+    }
+    if !rest.is_empty() {
+        spans.push((rest.to_owned(), false));
+    }
+    div()
+        .flex_1()
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .text_size(px(12.0))
+        .flex()
+        .children(spans.into_iter().map(|(text, highlighted)| {
+            if highlighted {
+                div()
+                    .text_color(rgb(ACCENT))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child(text)
+            } else {
+                div().text_color(rgb(INK_MUTED)).child(text)
+            }
+        }))
+        .into_any_element()
 }
 
 fn activity_action_content(icon: IconName, label: &'static str) -> gpui::Div {

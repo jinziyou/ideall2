@@ -163,7 +163,8 @@ mod mobile {
     };
     use ideall_application::{
         AgentAuditRecord, AgentModelSettings, AgentTranscriptMessage, AuditStatus, HOME_ROOT_ID,
-        LocalWorkspace, ModelRole, NodeSummary, OpenAiCompatibleClient, SyncSettings,
+        INBOX_ROOT_ID, LocalWorkspace, ModelRole, NodeSummary, OpenAiCompatibleClient,
+        SyncSettings,
     };
     use ideall_domain::{
         EnginePlatform, TabDescriptor, WorkspaceState, engine_runtime_capabilities, tab_key,
@@ -417,6 +418,8 @@ mod mobile {
         fn refresh(&mut self) {
             let result = if self.show_trash {
                 self.service.list_trash()
+            } else if self.active_section == "收集箱" {
+                self.service.list_children(INBOX_ROOT_ID)
             } else if !self.search_query.trim().is_empty() {
                 self.service.search(&self.search_query, 200)
             } else {
@@ -533,7 +536,18 @@ mod mobile {
         }
 
         fn create_bookmark(&mut self, cx: &mut Context<Self>) {
-            let parent = self.creation_parent();
+            let parent = match self.creation_parent() {
+                Some(parent) => Some(parent),
+                // 未选中目录时书签先落入收集箱，不再直接挂到首页。
+                None => match self.service.ensure_inbox() {
+                    Ok(inbox) => Some(inbox),
+                    Err(error) => {
+                        self.status = error.to_string();
+                        cx.notify();
+                        return;
+                    }
+                },
+            };
             match self.service.create_bookmark(
                 parent.as_deref(),
                 "新建书签",
@@ -1732,6 +1746,13 @@ mod mobile {
             self.search_requests.invalidate();
             drop(self.search_task.take());
             self.active_section = section;
+            if section == "收集箱"
+                && let Err(error) = self.service.ensure_inbox()
+            {
+                self.status = error.to_string();
+                cx.notify();
+                return;
+            }
             self.refresh();
             if section == "设置" {
                 if let Ok(settings) = self.service.load_sync_settings() {

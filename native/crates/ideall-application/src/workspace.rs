@@ -29,6 +29,7 @@ use crate::note_document::{NoteDocumentError, apply_note_text, project_note};
 use crate::note_rich_text::note_node_id_from_url;
 
 pub const HOME_ROOT_ID: &str = "ideall-home";
+pub const INBOX_ROOT_ID: &str = "ideall-inbox";
 const ENGINE_PREFERENCES_KEY: &str = "engine-preferences:files";
 const SYNC_SETTINGS_KEY: &str = "sync-settings:v1";
 const AGENT_MODEL_SETTINGS_KEY: &str = "agent-model-settings:v1";
@@ -487,6 +488,55 @@ impl LocalWorkspace {
         };
         self.database.put_node(&node)?;
         Ok(node)
+    }
+
+    /// 惰性创建固定 id 的「收集箱」目录；已存在时直接复用，
+    /// 被移到回收站时恢复原节点而不是新建。
+    pub fn ensure_inbox(&mut self) -> Result<String, ApplicationError> {
+        match self.database.get_node(INBOX_ROOT_ID)? {
+            Some(mut node @ Node::Folder { .. }) => {
+                if node.base().deleted_at.is_some() {
+                    let timestamp = now_millis()?;
+                    if !self.database.restore_from_trash(INBOX_ROOT_ID, timestamp)? {
+                        node.base_mut().deleted_at = None;
+                        node.base_mut().updated_at = timestamp;
+                        self.database.put_node(&node)?;
+                    }
+                }
+                Ok(INBOX_ROOT_ID.into())
+            }
+            Some(node) => Err(ApplicationError::WrongKind {
+                id: INBOX_ROOT_ID.into(),
+                actual: node.kind(),
+                expected: NodeKind::Folder,
+            }),
+            None => {
+                let timestamp = now_millis()?;
+                self.database.put_node(&Node::Folder {
+                    base: BaseNode {
+                        id: INBOX_ROOT_ID.into(),
+                        parent_id: Some(HOME_ROOT_ID.into()),
+                        // 排在使用时间戳 sort_key 的普通目录之后。
+                        sort_key: format!("99999999999999999999-{INBOX_ROOT_ID}"),
+                        title: "收集箱".into(),
+                        tags: Vec::new(),
+                        created_at: timestamp,
+                        updated_at: timestamp,
+                        deleted_at: None,
+                        meta: BTreeMap::new(),
+                    },
+                    content: None,
+                })?;
+                Ok(INBOX_ROOT_ID.into())
+            }
+        }
+    }
+
+    /// 一键捕获书签：校验网址后以网址为初始标题落入收集箱。
+    pub fn capture_bookmark(&mut self, url: &str) -> Result<Node, ApplicationError> {
+        validated_bookmark_url(url)?;
+        let inbox = self.ensure_inbox()?;
+        self.create_bookmark(Some(&inbox), url, url)
     }
 
     pub fn create_file(
@@ -2702,6 +2752,71 @@ mod tests {
         assert_eq!(workspace.list_trash().unwrap()[0].id, id);
         assert!(workspace.restore(&id).unwrap());
         assert_eq!(workspace.plain_note(&id).unwrap().text, "本地正文");
+    }
+
+    #[test]
+    fn inbox_is_created_lazily_reused_and_sorted_after_regular_folders() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        assert!(workspace.node(INBOX_ROOT_ID).is_err());
+
+        assert_eq!(workspace.ensure_inbox().unwrap(), INBOX_ROOT_ID);
+        let node = workspace.node(INBOX_ROOT_ID).unwrap();
+        assert_eq!(node.kind(), NodeKind::Folder);
+        assert_eq!(node.base().title, "收集箱");
+        assert_eq!(node.base().parent_id.as_deref(), Some(HOME_ROOT_ID));
+
+        // 幂等：重复调用复用同一节点。
+        assert_eq!(workspace.ensure_inbox().unwrap(), INBOX_ROOT_ID);
+
+        let folder = workspace.create_folder(None, "普通目录").unwrap();
+        let home = workspace.list_home().unwrap();
+        let ids = home.iter().map(|item| item.id.as_str()).collect::<Vec<_>>();
+        assert_eq!(ids, vec![folder.base().id.as_str(), INBOX_ROOT_ID]);
+    }
+
+    #[test]
+    fn inbox_restores_the_original_node_after_trash() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        workspace.ensure_inbox().unwrap();
+        assert!(workspace.move_to_trash(INBOX_ROOT_ID).unwrap());
+        assert!(
+            workspace
+                .node(INBOX_ROOT_ID)
+                .unwrap()
+                .base()
+                .deleted_at
+                .is_some()
+        );
+
+        assert_eq!(workspace.ensure_inbox().unwrap(), INBOX_ROOT_ID);
+        let node = workspace.node(INBOX_ROOT_ID).unwrap();
+        assert!(node.base().deleted_at.is_none());
+        assert_eq!(node.base().title, "收集箱");
+        assert!(workspace.list_trash().unwrap().is_empty());
+    }
+
+    #[test]
+    fn capture_bookmark_lands_in_inbox_with_url_as_initial_title() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        let node = workspace.capture_bookmark("https://example.com/a").unwrap();
+        assert_eq!(node.base().parent_id.as_deref(), Some(INBOX_ROOT_ID));
+        assert_eq!(node.base().title, "https://example.com/a");
+
+        let children = workspace.list_children(INBOX_ROOT_ID).unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].id, node.base().id);
+    }
+
+    #[test]
+    fn capture_bookmark_rejects_invalid_urls_before_creating_inbox() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        for url in ["", "ftp://example.com", "not a url"] {
+            assert!(matches!(
+                workspace.capture_bookmark(url),
+                Err(ApplicationError::InvalidBookmarkUrl)
+            ));
+        }
+        assert!(workspace.node(INBOX_ROOT_ID).is_err());
     }
 
     #[test]

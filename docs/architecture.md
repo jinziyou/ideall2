@@ -11,7 +11,8 @@ protocol → domain → application → adapters → UI → platform app
 
 - `ideall-protocol`：稳定 ID、Node/FileRef、同步与归档 wire 契约。
 - `ideall-domain`：Engine、Workspace、导航和纯业务规则。
-- `ideall-application`：创建、编辑、回收、恢复、导入等跨界面用例。
+- `ideall-application`：创建、编辑、回收、恢复、导入等跨界面用例；固定 id 的「收集箱」
+  目录（`INBOX_ROOT_ID`）承接未整理捕获。
 - `ideall-presentation`：文案、导航模型、设计 Token 和无 GPUI 类型的视图状态。
 - `ideall-storage`：SQLite 权威数据、迁移与归档。
 - `ideall-sync` / `ideall-sync-http`：端到端加密同步与网络适配。

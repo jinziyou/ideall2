@@ -50,6 +50,7 @@ impl Render for IdeallMobile {
         let empty_message = match self.active_section {
             "搜索" => "没有匹配的本地内容",
             "回收站" => "回收站为空",
+            "收集箱" => "还没有未整理的内容，捕获的书签会先进这里",
             "活动" => "还没有本地活动",
             "浏览" => "还没有书签或关注源",
             "应用" => "平台 Engine capability 已就绪",
@@ -642,6 +643,22 @@ impl Render for IdeallMobile {
                                                     }),
                                                 )
                                                 .child("导入"),
+                                        )
+                                        .child(
+                                            div()
+                                                .id("mobile-show-inbox")
+                                                .px_3()
+                                                .py_2()
+                                                .rounded_full()
+                                                .bg(rgb(MESSAGE_TOOL))
+                                                .cursor_pointer()
+                                                .on_mouse_down(
+                                                    MouseButton::Left,
+                                                    cx.listener(|this, _, _, cx| {
+                                                        this.select_section("收集箱", cx);
+                                                    }),
+                                                )
+                                                .child("收集箱"),
                                         )
                                         .child(
                                             div()

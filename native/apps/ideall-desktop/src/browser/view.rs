@@ -106,6 +106,18 @@ impl IdeallDesktop {
                                 this.open_current_browser_external(cx);
                             })),
                     )
+                    .child(
+                        Button::new("browser-capture-bookmark")
+                            .label("存为书签")
+                            .icon(IdeallIcon::BookmarkPlus)
+                            .tooltip("把当前地址存入收集箱")
+                            .small()
+                            .ghost()
+                            .disabled(current_url.is_empty())
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.capture_browser_bookmark(cx);
+                            })),
+                    )
                     .when(surface == BrowserSurface::Bookmark, |toolbar| {
                         toolbar.child(
                             Button::new("browser-edit-bookmark")

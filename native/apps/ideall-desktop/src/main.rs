@@ -28,10 +28,11 @@ use gpui_component::{
 use ideall_acp::{AcpToolStatus, ExternalAcpConfig, command_exists, run_external_acp};
 use ideall_application::{
     AgentAuditRecord, AgentDocumentContext, AgentModelSettings, AgentToolRun,
-    AgentTranscriptMessage, AuditStatus, ExternalAcpSettings, HOME_ROOT_ID, LocalWorkspace,
-    ModelRole, NodeSummary, NoteBlockIndent, NoteBlockMove, NoteBlockStyle, NoteColor,
-    NoteInlineStyle, NoteSlashCommand, OpenAiCompatibleClient, SyncSettings, note_mention_query,
-    note_node_id_from_url, note_node_url, note_slash_commands, note_slash_query,
+    AgentTranscriptMessage, AuditStatus, ExternalAcpSettings, HOME_ROOT_ID, INBOX_ROOT_ID,
+    LocalWorkspace, ModelRole, NodeSummary, NoteBlockIndent, NoteBlockMove, NoteBlockStyle,
+    NoteColor, NoteInlineStyle, NoteSlashCommand, OpenAiCompatibleClient, SyncSettings,
+    note_mention_query, note_node_id_from_url, note_node_url, note_slash_commands,
+    note_slash_query,
 };
 use ideall_domain::{
     EnginePlatform, EnginePreferences, EngineRuntimeKind, ExplorerLayoutState, TabDescriptor,
@@ -126,6 +127,7 @@ struct IdeallDesktop {
     browser: BrowserWorkspace,
     active_section: SharedString,
     show_trash: bool,
+    inbox_count: usize,
     search_query: String,
     mentionable_notes: Vec<NodeSummary>,
     note_backlinks: Vec<NodeSummary>,
@@ -397,6 +399,7 @@ impl IdeallDesktop {
             browser,
             active_section: "我的".into(),
             show_trash: false,
+            inbox_count: 0,
             search_query: String::new(),
             mentionable_notes,
             note_backlinks: Vec::new(),
@@ -468,6 +471,9 @@ impl IdeallDesktop {
             this.editor.restore_active_session(window, cx);
         }
         this.load_agent_activity(cx);
+        // 启动即按当前分区应用过滤并刷新收集箱计数，
+        // 避免首帧展示未过滤的初始列表（收集箱重复出现、虚拟根计数为 0）。
+        this.refresh_items();
         this
     }
 
@@ -478,8 +484,15 @@ impl IdeallDesktop {
                 .filter(|item| item.kind == NodeKind::Note && !item.deleted)
                 .collect();
         }
+        self.inbox_count = self
+            .service
+            .list_children(INBOX_ROOT_ID)
+            .map(|children| children.len())
+            .unwrap_or(0);
         let result = if self.show_trash {
             self.service.list_trash()
+        } else if self.active_section.as_ref() == "收集箱" {
+            self.service.list_children(INBOX_ROOT_ID)
         } else if !self.search_query.trim().is_empty() {
             self.service.search(&self.search_query, 200)
         } else {
@@ -494,6 +507,22 @@ impl IdeallDesktop {
                     "浏览" => items
                         .retain(|item| matches!(item.kind, NodeKind::Bookmark | NodeKind::Feed)),
                     "应用" | "设置" => items.clear(),
+                    "我的" => {
+                        // 收集箱通过虚拟根进入，不在「我的」树中重复出现。
+                        let mut hidden =
+                            std::collections::HashSet::from([INBOX_ROOT_ID.to_owned()]);
+                        items.retain(|item| {
+                            let hide = hidden.contains(item.id.as_str())
+                                || item
+                                    .parent_id
+                                    .as_deref()
+                                    .is_some_and(|parent| hidden.contains(parent));
+                            if hide {
+                                hidden.insert(item.id.clone());
+                            }
+                            !hide
+                        });
+                    }
                     _ => {}
                 }
                 items
@@ -606,7 +635,18 @@ impl IdeallDesktop {
     }
 
     fn create_bookmark(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let parent = self.creation_parent();
+        let parent = match self.creation_parent() {
+            Some(parent) => Some(parent),
+            // 未选中目录时书签先落入收集箱，不再直接挂到首页。
+            None => match self.service.ensure_inbox() {
+                Ok(inbox) => Some(inbox),
+                Err(error) => {
+                    self.status = Some(error.to_string().into());
+                    cx.notify();
+                    return;
+                }
+            },
+        };
         match self
             .service
             .create_bookmark(parent.as_deref(), "新建书签", "https://example.com/")
@@ -1981,6 +2021,27 @@ impl IdeallDesktop {
         self.explorer.clear_selection();
         self.clear_selection(window, cx);
         self.refresh_items();
+        cx.notify();
+    }
+
+    fn show_inbox(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.service.ensure_inbox() {
+            Ok(_) => {
+                self.show_trash = false;
+                self.search_query.clear();
+                self.search_requests.invalidate();
+                drop(self.search_task.take());
+                self.suppress_search_events = true;
+                self.search_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                self.suppress_search_events = false;
+                self.active_section = "收集箱".into();
+                self.explorer.clear_selection();
+                self.clear_selection(window, cx);
+                self.refresh_items();
+            }
+            Err(error) => self.status = Some(error.to_string().into()),
+        }
         cx.notify();
     }
 

@@ -70,4 +70,24 @@ impl IdeallDesktop {
         self.status = Some("已交给系统浏览器打开".into());
         cx.notify();
     }
+
+    pub(crate) fn capture_browser_bookmark(&mut self, cx: &mut Context<Self>) {
+        let value = self.browser.address_input.read(cx).value().to_string();
+        let url = match normalize_browser_url(&value) {
+            Ok(url) => url,
+            Err(error) => {
+                self.status = Some(format!("无法存入收集箱：{error}").into());
+                cx.notify();
+                return;
+            }
+        };
+        match self.service.capture_bookmark(&url) {
+            Ok(_) => {
+                self.refresh_items();
+                self.status = Some("已存入收集箱".into());
+            }
+            Err(error) => self.status = Some(format!("无法存入收集箱：{error}").into()),
+        }
+        cx.notify();
+    }
 }

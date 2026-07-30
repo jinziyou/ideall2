@@ -144,7 +144,8 @@ impl IdeallDesktop {
     ) -> gpui::AnyElement {
         let section = navigation.section;
         let selected = self.active_section.as_ref() == section
-            || (section == "我的" && matches!(self.active_section.as_ref(), "搜索" | "回收站"));
+            || (section == "我的"
+                && matches!(self.active_section.as_ref(), "搜索" | "回收站" | "收集箱"));
         let icon = match section {
             "我的" => IconName::LayoutDashboard,
             "活动" => IconName::Calendar,
@@ -277,11 +278,15 @@ impl IdeallDesktop {
         let can_create = !self.show_trash && self.active_section.as_ref() == "我的";
         let show_browse = self.active_section.as_ref() == "浏览";
         let show_context = !matches!(self.active_section.as_ref(), "应用" | "设置");
-        let show_private_root = self.active_section.as_ref() == "回收站";
+        let show_private_root = matches!(self.active_section.as_ref(), "回收站" | "收集箱");
+        let show_inbox_root = matches!(self.active_section.as_ref(), "我的" | "收集箱");
+        let inbox_selected = self.active_section.as_ref() == "收集箱";
+        let inbox_count = self.inbox_count;
         let show_trash_root = self.active_section.as_ref() == "我的";
         let empty_message: SharedString = match self.active_section.as_ref() {
             "搜索" => "未找到匹配的本地内容".into(),
             "回收站" => "回收站为空".into(),
+            "收集箱" => "还没有未整理的内容，捕获的书签会先进这里".into(),
             "活动" => "还没有最近修改的内容".into(),
             "浏览" => "还没有书签或关注源".into(),
             "应用" => "在编辑区配置模型、ACP 与 Engine".into(),
@@ -294,6 +299,7 @@ impl IdeallDesktop {
             "浏览" => "关注与书签",
             "搜索" => "搜索结果",
             "回收站" => "回收站",
+            "收集箱" => "收集箱",
             section => section,
         };
 
@@ -730,6 +736,48 @@ impl IdeallDesktop {
                                         )
                                 })
                         }))
+                        .when(show_inbox_root, |list| {
+                            list.child(
+                                div()
+                                    .id("tree-root-inbox")
+                                    .h(px(28.0))
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .px_2()
+                                    .mt_1()
+                                    .rounded_md()
+                                    .cursor_pointer()
+                                    .text_sm()
+                                    .text_color(rgb(INK_MUTED))
+                                    .when(inbox_selected, |row| {
+                                        row.bg(rgb(SELECTION)).text_color(rgb(INK))
+                                    })
+                                    .hover(|row| row.bg(rgb(HOVER)))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.show_inbox(window, cx);
+                                    }))
+                                    .child(
+                                        Icon::new(IconName::Inbox)
+                                            .size(px(16.0))
+                                            .text_color(rgb(INK_FAINT)),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .overflow_hidden()
+                                            .text_ellipsis()
+                                            .whitespace_nowrap()
+                                            .child("收集箱"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(rgb(INK_FAINT))
+                                            .child(inbox_count.to_string()),
+                                    ),
+                            )
+                        })
                         .when(show_trash_root, |list| {
                             list.child(
                                 div()
@@ -1569,6 +1617,12 @@ impl IdeallDesktop {
                 "打开项目后可恢复或永久删除",
                 IconName::Delete,
                 "回收站为空",
+            ),
+            "收集箱" => (
+                "收集箱",
+                "捕获与未整理的内容先进这里，稍后再归类",
+                IconName::Inbox,
+                "还没有未整理的内容，捕获的书签会先进这里",
             ),
             _ => (
                 "本地工作区",
@@ -2809,7 +2863,7 @@ impl Render for IdeallDesktop {
         let show_collection_landing = !has_selection
             && matches!(
                 self.active_section.as_ref(),
-                "活动" | "浏览" | "搜索" | "回收站"
+                "活动" | "浏览" | "搜索" | "回收站" | "收集箱"
             );
         let active_browser_surface = browser_surface(
             self.editor.active_engine_id.as_deref(),

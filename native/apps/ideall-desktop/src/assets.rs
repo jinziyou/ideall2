@@ -7,6 +7,7 @@ pub(super) struct IdeallAssets;
 
 #[derive(Clone, Copy)]
 pub(super) enum IdeallIcon {
+    BookmarkPlus,
     Brand,
     ShieldCheck,
     Wrench,
@@ -15,6 +16,7 @@ pub(super) enum IdeallIcon {
 impl IconNamed for IdeallIcon {
     fn path(self) -> SharedString {
         match self {
+            Self::BookmarkPlus => "icons/bookmark-plus.svg",
             Self::Brand => "icons/brand.svg",
             Self::ShieldCheck => "icons/shield-check.svg",
             Self::Wrench => "icons/wrench.svg",
@@ -23,11 +25,12 @@ impl IconNamed for IdeallIcon {
     }
 }
 
-const ICON_PATHS: [&str; 29] = [
+const ICON_PATHS: [&str; 31] = [
     "icons/arrow-left.svg",
     "icons/arrow-right.svg",
     "icons/arrow-up.svg",
     "icons/book-open.svg",
+    "icons/bookmark-plus.svg",
     "icons/bot.svg",
     "icons/brand.svg",
     "icons/calendar.svg",
@@ -43,6 +46,7 @@ const ICON_PATHS: [&str; 29] = [
     "icons/folder-open.svg",
     "icons/gallery-vertical-end.svg",
     "icons/globe.svg",
+    "icons/inbox.svg",
     "icons/layout-dashboard.svg",
     "icons/panel-left.svg",
     "icons/panel-right-close.svg",
@@ -62,6 +66,7 @@ impl AssetSource for IdeallAssets {
             "icons/arrow-right.svg" => Some(include_bytes!("../assets/icons/arrow-right.svg")),
             "icons/arrow-up.svg" => Some(include_bytes!("../assets/icons/arrow-up.svg")),
             "icons/book-open.svg" => Some(include_bytes!("../assets/icons/book-open.svg")),
+            "icons/bookmark-plus.svg" => Some(include_bytes!("../assets/icons/bookmark-plus.svg")),
             "icons/brand.svg" => Some(include_bytes!("../assets/icons/brand.svg")),
             "icons/bot.svg" => Some(include_bytes!("../assets/icons/bot.svg")),
             "icons/calendar.svg" => Some(include_bytes!("../assets/icons/calendar.svg")),
@@ -79,6 +84,7 @@ impl AssetSource for IdeallAssets {
                 Some(include_bytes!("../assets/icons/gallery-vertical-end.svg"))
             }
             "icons/globe.svg" => Some(include_bytes!("../assets/icons/globe.svg")),
+            "icons/inbox.svg" => Some(include_bytes!("../assets/icons/inbox.svg")),
             "icons/layout-dashboard.svg" => {
                 Some(include_bytes!("../assets/icons/layout-dashboard.svg"))
             }
@@ -137,6 +143,7 @@ mod tests {
             IconName::FolderOpen,
             IconName::GalleryVerticalEnd,
             IconName::Globe,
+            IconName::Inbox,
             IconName::LayoutDashboard,
             IconName::PanelLeft,
             IconName::PanelRightClose,
@@ -158,7 +165,11 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
-        for icon in [IdeallIcon::ShieldCheck, IdeallIcon::Wrench] {
+        for icon in [
+            IdeallIcon::BookmarkPlus,
+            IdeallIcon::ShieldCheck,
+            IdeallIcon::Wrench,
+        ] {
             assert!(IdeallAssets.load(icon.path().as_ref()).unwrap().is_some());
         }
     }

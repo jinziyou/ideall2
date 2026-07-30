@@ -86,7 +86,7 @@ jobs:
           done
           (cd target/native-packages && sha256sum -c SHA256SUMS)
         working-directory: native
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ideall-native-linux-${{ inputs.version }}
           path: |
@@ -150,7 +150,7 @@ jobs:
           xcrun stapler validate target/native-packages/ideall.app
           xcrun stapler validate target/native-packages/*.dmg
         working-directory: native
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ideall-native-macos-${{ inputs.version }}
           path: |
@@ -208,7 +208,7 @@ jobs:
             bash scripts/verify-artifact.sh desktop "$artifact"
           done
         working-directory: native
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ideall-native-windows-${{ inputs.version }}
           path: |
@@ -285,7 +285,7 @@ jobs:
           mkdir -p target/native-release-mobile
           cp "$artifact" "target/native-release-mobile/ideall-native-${IDEALL_VERSION}-android-arm64.aab"
         working-directory: native
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ideall-native-android-${{ inputs.version }}
           path: native/target/native-release-mobile/ideall-native-${{ inputs.version }}-android-arm64.aab
@@ -348,7 +348,7 @@ jobs:
           bash scripts/verify-artifact.sh ios-archive apps/ideall-mobile/platforms/ios/build/ideall.xcarchive
           bash scripts/verify-artifact.sh ios-ipa "apps/ideall-mobile/platforms/ios/build/ideall-native-${IDEALL_VERSION}-ios-arm64.ipa"
         working-directory: native
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ideall-native-ios-${{ inputs.version }}
           path: native/apps/ideall-mobile/platforms/ios/build/ideall-native-${{ inputs.version }}-ios-arm64.ipa
@@ -444,7 +444,7 @@ jobs:
             --channel "$RELEASE_CHANNEL"
       - name: Finalize checksums and release inventory
         run: node scripts/native-release-artifacts.mjs finalize
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ideall-native-release-${{ inputs.channel }}-${{ inputs.version }}
           path: native-release-ready

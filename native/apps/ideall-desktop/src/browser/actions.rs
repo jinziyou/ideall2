@@ -82,12 +82,51 @@ impl IdeallDesktop {
             }
         };
         match self.service.capture_bookmark(&url) {
-            Ok(_) => {
+            Ok(node) => {
                 self.refresh_items();
                 self.status = Some("已存入收集箱".into());
+                self.fetch_bookmark_metadata(node.base().id.clone(), url, cx);
             }
             Err(error) => self.status = Some(format!("无法存入收集箱：{error}").into()),
         }
         cx.notify();
+    }
+
+    /// 捕获成功后后台补全书签元数据；抓取或合并失败完全静默，
+    /// 不改动「已存入收集箱」的状态提示。
+    fn fetch_bookmark_metadata(&mut self, id: String, url: String, cx: &mut Context<Self>) {
+        let fetch = cx.background_executor().spawn(async move {
+            ideall_webmeta::fetch_page_meta(&url).map(|meta| BookmarkMetadata {
+                canonical_url: meta.canonical_url,
+                title: meta.title,
+                description: meta.description,
+                favicon: meta.favicon,
+            })
+        });
+        cx.spawn(async move |view, cx| {
+            let result = fetch.await;
+            let _ = cx.update(|cx| {
+                let Some(view) = view.upgrade() else {
+                    return;
+                };
+                view.update(cx, |this, cx| {
+                    let Ok(meta) = result else {
+                        return;
+                    };
+                    if meta.canonical_url.is_none()
+                        && meta.title.is_none()
+                        && meta.description.is_none()
+                        && meta.favicon.is_none()
+                    {
+                        return;
+                    }
+                    if this.service.apply_bookmark_metadata(&id, &meta).is_ok() {
+                        this.refresh_items();
+                        cx.notify();
+                    }
+                });
+            });
+        })
+        .detach();
     }
 }

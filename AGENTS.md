@@ -7,7 +7,7 @@ ideall 是基于 Rust 与 GPUI 的本地优先个人信息终端。生产源码�
 `apps/ideall-cli` 提供检查和迁移工具；`crates/ideall-protocol` 保持纯契约，
 `ideall-domain` 负责 Engine/Workspace 规则，`ideall-application` 负责跨 UI 用例，
 `ideall-presentation` 收口无 GPUI 类型的导航、文案与设计 Token，其余 storage、sync、
-agent、acp、secrets、updater 是适配层。Rust 测试位于各 crate 的 `src/` 或 `tests/`，
+agent、acp、secrets、updater、webmeta 是适配层。Rust 测试位于各 crate 的 `src/` 或 `tests/`，
 维护脚本测试位于 `scripts/*.test.mjs`。文档入口是 `docs/README.md`。
 
 旧 Next.js/Tauri V2 只存在于 `legacy/tauri-v2` 分支。`dev` 与 `main` 不得重新引入 WebView

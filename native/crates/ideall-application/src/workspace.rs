@@ -143,6 +143,14 @@ impl From<&NodeProjection> for NodeSummary {
     }
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct BookmarkMetadata {
+    pub canonical_url: Option<String>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub favicon: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlainNoteDocument {
     pub text: String,
@@ -537,6 +545,51 @@ impl LocalWorkspace {
         validated_bookmark_url(url)?;
         let inbox = self.ensure_inbox()?;
         self.create_bookmark(Some(&inbox), url, url)
+    }
+
+    /// 合并抓取到的页面元数据：只覆盖未被人工编辑的字段。
+    ///
+    /// 标题保护：仅当现标题仍等于现网址或占位标题「新建书签」时才替换；
+    /// canonical 地址与现网址不同且合法时才更新 `content.url`。
+    pub fn apply_bookmark_metadata(
+        &mut self,
+        id: &str,
+        meta: &BookmarkMetadata,
+    ) -> Result<Node, ApplicationError> {
+        let mut node = self.node(id)?;
+        let Node::Bookmark { base, content } = &mut node else {
+            return Err(ApplicationError::WrongKind {
+                id: id.into(),
+                actual: node.kind(),
+                expected: NodeKind::Bookmark,
+            });
+        };
+        let title_untouched = base.title == content.url || base.title == "新建书签";
+        if title_untouched
+            && let Some(title) = meta.title.as_deref().map(str::trim)
+            && !title.is_empty()
+        {
+            base.title = title.chars().take(1024).collect();
+        }
+        if let Some(description) = meta.description.as_deref().map(str::trim)
+            && !description.is_empty()
+        {
+            content.description = description.to_owned();
+        }
+        if let Some(favicon) = meta.favicon.as_deref().map(str::trim)
+            && !favicon.is_empty()
+        {
+            content.favicon = favicon.to_owned();
+        }
+        if let Some(canonical) = meta.canonical_url.as_deref()
+            && canonical != content.url
+            && let Ok(parsed) = validated_bookmark_url(canonical)
+        {
+            content.url = parsed.into();
+        }
+        base.updated_at = now_millis()?;
+        self.database.put_node(&node)?;
+        Ok(node)
     }
 
     pub fn create_file(
@@ -2817,6 +2870,91 @@ mod tests {
             ));
         }
         assert!(workspace.node(INBOX_ROOT_ID).is_err());
+    }
+
+    fn bookmark_metadata() -> BookmarkMetadata {
+        BookmarkMetadata {
+            canonical_url: Some("https://example.com/canonical".into()),
+            title: Some("抓取标题".into()),
+            description: Some("抓取摘要".into()),
+            favicon: Some("https://example.com/favicon.ico".into()),
+        }
+    }
+
+    #[test]
+    fn apply_bookmark_metadata_replaces_url_title_and_writes_fields() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        let node = workspace.capture_bookmark("https://example.com/a").unwrap();
+        let id = node.base().id.clone();
+
+        let updated = workspace
+            .apply_bookmark_metadata(&id, &bookmark_metadata())
+            .unwrap();
+        let Node::Bookmark { base, content } = &updated else {
+            panic!("capture_bookmark 创建的是书签");
+        };
+        assert_eq!(base.title, "抓取标题");
+        assert_eq!(content.url, "https://example.com/canonical");
+        assert_eq!(content.description, "抓取摘要");
+        assert_eq!(content.favicon, "https://example.com/favicon.ico");
+
+        // 占位标题「新建书签」同样视为未人工编辑。
+        let placeholder = workspace
+            .create_bookmark(None, "新建书签", "https://example.com/b")
+            .unwrap();
+        let updated = workspace
+            .apply_bookmark_metadata(&placeholder.base().id, &bookmark_metadata())
+            .unwrap();
+        assert_eq!(updated.base().title, "抓取标题");
+    }
+
+    #[test]
+    fn apply_bookmark_metadata_keeps_user_edited_title() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        let node = workspace
+            .create_bookmark(None, "我自己起的标题", "https://example.com/")
+            .unwrap();
+
+        let updated = workspace
+            .apply_bookmark_metadata(&node.base().id, &bookmark_metadata())
+            .unwrap();
+        let Node::Bookmark { base, content } = &updated else {
+            panic!("create_bookmark 创建的是书签");
+        };
+        assert_eq!(base.title, "我自己起的标题");
+        assert_eq!(content.description, "抓取摘要");
+        assert_eq!(content.favicon, "https://example.com/favicon.ico");
+    }
+
+    #[test]
+    fn apply_bookmark_metadata_ignores_invalid_canonical_urls() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        let node = workspace.capture_bookmark("https://example.com/a").unwrap();
+        let id = node.base().id.clone();
+
+        let updated = workspace
+            .apply_bookmark_metadata(
+                &id,
+                &BookmarkMetadata {
+                    canonical_url: Some("ftp://example.com/not-http".into()),
+                    ..BookmarkMetadata::default()
+                },
+            )
+            .unwrap();
+        let Node::Bookmark { content, .. } = &updated else {
+            panic!("capture_bookmark 创建的是书签");
+        };
+        assert_eq!(content.url, "https://example.com/a");
+    }
+
+    #[test]
+    fn apply_bookmark_metadata_rejects_non_bookmark_nodes() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        let note = workspace.create_note(None, "笔记").unwrap();
+        assert!(matches!(
+            workspace.apply_bookmark_metadata(&note.base().id, &bookmark_metadata()),
+            Err(ApplicationError::WrongKind { .. })
+        ));
     }
 
     #[test]

@@ -18,6 +18,7 @@ protocol → domain → application → adapters → UI → platform app
 - `ideall-sync` / `ideall-sync-http`：端到端加密同步与网络适配。
 - `ideall-agent` / `ideall-acp`：Grant、MCP 工具、模型传输和外部 ACP 客户端。
 - `ideall-secrets` / `ideall-updater`：平台凭据库与签名更新。
+- `ideall-webmeta`：书签页面的有界 HTML 元数据抓取（标题、摘要、favicon 与 canonical）。
 - `ideall-desktop` / `ideall-mobile`：平台组合根和 GPUI Render 层。
 
 共享 crate 的公开 API 不得包含 GPUI、SQLite、HTTP 或平台系统类型。依赖只能沿上图向右；

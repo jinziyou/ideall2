@@ -28,10 +28,10 @@ use gpui_component::{
 use ideall_acp::{AcpToolStatus, ExternalAcpConfig, command_exists, run_external_acp};
 use ideall_application::{
     AgentAuditRecord, AgentDocumentContext, AgentModelSettings, AgentToolRun,
-    AgentTranscriptMessage, AuditStatus, ExternalAcpSettings, HOME_ROOT_ID, INBOX_ROOT_ID,
-    LocalWorkspace, ModelRole, NodeSummary, NoteBlockIndent, NoteBlockMove, NoteBlockStyle,
-    NoteColor, NoteInlineStyle, NoteSlashCommand, OpenAiCompatibleClient, SyncSettings,
-    note_mention_query, note_node_id_from_url, note_node_url, note_slash_commands,
+    AgentTranscriptMessage, AuditStatus, BookmarkMetadata, ExternalAcpSettings, HOME_ROOT_ID,
+    INBOX_ROOT_ID, LocalWorkspace, ModelRole, NodeSummary, NoteBlockIndent, NoteBlockMove,
+    NoteBlockStyle, NoteColor, NoteInlineStyle, NoteSlashCommand, OpenAiCompatibleClient,
+    SyncSettings, note_mention_query, note_node_id_from_url, note_node_url, note_slash_commands,
     note_slash_query,
 };
 use ideall_domain::{

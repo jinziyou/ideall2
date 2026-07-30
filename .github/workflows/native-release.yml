@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Require repository and release versions to match
@@ -63,7 +63,7 @@ jobs:
     needs: gate
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install GPUI Linux dependencies
@@ -111,7 +111,7 @@ jobs:
       IDEALL_APPLE_TEAM_ID: ${{ secrets.IDEALL_APPLE_TEAM_ID }}
       IDEALL_APPLE_APP_PASSWORD: ${{ secrets.IDEALL_APPLE_APP_PASSWORD }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -173,7 +173,7 @@ jobs:
       IDEALL_WINDOWS_CERTIFICATE_BASE64: ${{ secrets.IDEALL_WINDOWS_CERTIFICATE_BASE64 }}
       IDEALL_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.IDEALL_WINDOWS_CERTIFICATE_PASSWORD }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -232,7 +232,7 @@ jobs:
       IDEALL_ANDROID_KEY_ALIAS: ${{ secrets.IDEALL_ANDROID_KEY_ALIAS }}
       IDEALL_ANDROID_KEY_PASSWORD: ${{ secrets.IDEALL_ANDROID_KEY_PASSWORD }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
@@ -305,7 +305,7 @@ jobs:
       IDEALL_IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IDEALL_IOS_PROVISIONING_PROFILE_BASE64 }}
       IDEALL_IOS_CODE_SIGN_STYLE: Manual
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -372,7 +372,7 @@ jobs:
       IDEALL_SYNC_CODE: ${{ secrets.IDEALL_SYNC_CODE }}
       IDEALL_SYNC_BEARER_TOKEN: ${{ secrets.IDEALL_SYNC_BEARER_TOKEN }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -415,7 +415,7 @@ jobs:
       RELEASE_OUTPUT_DIR: native-release-ready
       RELEASE_NOTES: Native ${{ inputs.channel }} ${{ inputs.version }} · ${{ github.sha }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable

@@ -185,9 +185,13 @@ pub fn decrypt_workspace_archive(
     let cipher =
         Aes256Gcm::new_from_slice(&key).map_err(|_| WorkspaceArchiveError::DecryptionFailed)?;
     let aad = envelope.additional_data()?;
+    let nonce = iv
+        .as_slice()
+        .try_into()
+        .map_err(|_| WorkspaceArchiveError::InvalidEnvelope)?;
     let plaintext = cipher
         .decrypt(
-            iv.as_slice().into(),
+            nonce,
             Payload {
                 msg: &ciphertext,
                 aad: &aad,

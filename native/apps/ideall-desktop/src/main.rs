@@ -173,8 +173,7 @@ impl IdeallDesktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let search_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("搜索标题与正文（Ctrl/⌘ K）"));
+        let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("搜索标题与正文"));
         let feed_key_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("发布者域名，例如 example.com"));
         let browser_address_input =

@@ -620,11 +620,10 @@ impl IdeallDesktop {
                                             is_code,
                                             |content| {
                                                 content
-                                                    .p_2()
+                                                    .p_3()
                                                     .rounded_md()
-                                                    .border_1()
-                                                    .border_color(rgb(BORDER))
                                                     .bg(rgb(SURFACE_MUTED))
+                                                    .font_family("monospace")
                                             },
                                         )
                                         .when(is_callout, |content| {
@@ -797,6 +796,12 @@ impl IdeallDesktop {
                                             )
                                         })
                                         .when(is_bookmark && !show_input, |content| {
+                                            let host = url::Url::parse(&value)
+                                                .ok()
+                                                .and_then(|parsed| {
+                                                    parsed.host_str().map(str::to_owned)
+                                                })
+                                                .unwrap_or_else(|| "网页书签".into());
                                             content
                                                 .child(
                                                     div()
@@ -808,7 +813,10 @@ impl IdeallDesktop {
                                                         .rounded_md()
                                                         .bg(rgb(ACCENT_SOFT))
                                                         .text_color(rgb(ACCENT))
-                                                        .child("↗"),
+                                                        .child(
+                                                            Icon::new(IconName::Globe)
+                                                                .size(px(15.0)),
+                                                        ),
                                                 )
                                                 .child(
                                                     div()
@@ -819,12 +827,15 @@ impl IdeallDesktop {
                                                         .gap(px(2.0))
                                                         .child(
                                                             div()
+                                                                .overflow_hidden()
+                                                                .text_ellipsis()
+                                                                .whitespace_nowrap()
                                                                 .text_sm()
                                                                 .font_weight(
                                                                     gpui::FontWeight::SEMIBOLD,
                                                                 )
                                                                 .text_color(rgb(INK))
-                                                                .child("网页书签"),
+                                                                .child(host),
                                                         )
                                                         .child(
                                                             div()
@@ -840,7 +851,8 @@ impl IdeallDesktop {
                                                     Button::new(SharedString::from(format!(
                                                         "note-bookmark-open-card-{id}"
                                                     )))
-                                                    .label("打开")
+                                                    .icon(IconName::ExternalLink)
+                                                    .tooltip("在系统浏览器中打开")
                                                     .xsmall()
                                                     .ghost()
                                                     .on_click(cx.listener(
@@ -982,6 +994,9 @@ impl IdeallDesktop {
                                                             NoteEditorBlockKind::Heading(_) => {
                                                                 px(17.0)
                                                             }
+                                                            NoteEditorBlockKind::Code { .. } => {
+                                                                px(13.0)
+                                                            }
                                                             _ => px(16.0),
                                                         })
                                                         .line_height(match kind {
@@ -993,6 +1008,9 @@ impl IdeallDesktop {
                                                             }
                                                             NoteEditorBlockKind::Heading(3) => {
                                                                 px(30.0)
+                                                            }
+                                                            NoteEditorBlockKind::Code { .. } => {
+                                                                px(20.0)
                                                             }
                                                             _ => px(26.0),
                                                         })

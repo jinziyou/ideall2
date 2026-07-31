@@ -608,15 +608,6 @@ impl IdeallDesktop {
                                         .flex()
                                         .items_start()
                                         .when(
-                                            matches!(kind, NoteEditorBlockKind::Quote),
-                                            |content| {
-                                                content
-                                                    .border_l_1()
-                                                    .border_color(rgb(INK_MUTED))
-                                                    .pl_3()
-                                            },
-                                        )
-                                        .when(
                                             is_code,
                                             |content| {
                                                 content

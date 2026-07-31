@@ -2809,7 +2809,7 @@ impl IdeallDesktop {
                         body.child(self.render_note_mention_menu(mention_candidates, cx))
                     }),
             )
-            .when(!show_delegated_engine && !is_note_document, |editor| {
+            .when(!show_delegated_engine, |editor| {
                 editor.child(
                     div()
                         .h(px(30.0))

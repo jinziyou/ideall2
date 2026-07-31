@@ -961,9 +961,12 @@ impl IdeallDesktop {
                 if let Node::Bookmark { content, .. } = node {
                     self.editor.suppress_events = true;
                     self.editor.body_input.update(cx, |input, cx| {
-                        input.set_value(content.url, window, cx);
+                        input.set_value(content.url.clone(), window, cx);
                     });
                     self.editor.suppress_events = false;
+                    // 手动编辑保存的书签同样后台补全元数据；apply 只替换占位标题，
+                    // 用户改过的标题不会被覆盖，抓取失败完全静默。
+                    self.fetch_bookmark_metadata(draft.id.clone(), content.url.clone(), cx);
                 }
                 if self.editor.selected_kind == Some(NodeKind::File) {
                     let language = text_highlight_for_node(&self.service, &draft.id);

@@ -1,4 +1,5 @@
 use super::*;
+use gpui_component::input::Position;
 
 impl IdeallDesktop {
     pub(crate) fn navigate_browser_to(
@@ -21,9 +22,16 @@ impl IdeallDesktop {
         } else {
             self.browser.current_url = Some(url.clone());
         }
-        self.browser
-            .address_input
-            .update(cx, |input, cx| input.set_value(url.clone(), window, cx));
+        // gpui-component 单行 set_value 会把光标移到末尾，地址被横向滚动截断；
+        // 回到文本开头后恢复先前焦点。
+        let previous_focus = window.focused(cx);
+        self.browser.address_input.update(cx, |input, cx| {
+            input.set_value(url.clone(), window, cx);
+            input.set_cursor_position(Position::new(0, 0), window, cx);
+        });
+        if let Some(handle) = previous_focus {
+            window.focus(&handle);
+        }
         self.browser.webview = None;
         match create_embedded_browser(&url, window, cx) {
             Ok(webview) => {
@@ -94,7 +102,12 @@ impl IdeallDesktop {
 
     /// 捕获成功后后台补全书签元数据；抓取或合并失败完全静默，
     /// 不改动「已存入收集箱」的状态提示。
-    fn fetch_bookmark_metadata(&mut self, id: String, url: String, cx: &mut Context<Self>) {
+    pub(crate) fn fetch_bookmark_metadata(
+        &mut self,
+        id: String,
+        url: String,
+        cx: &mut Context<Self>,
+    ) {
         let fetch = cx.background_executor().spawn(async move {
             ideall_webmeta::fetch_page_meta(&url).map(|meta| BookmarkMetadata {
                 canonical_url: meta.canonical_url,

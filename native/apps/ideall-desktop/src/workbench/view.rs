@@ -750,6 +750,16 @@ impl IdeallDesktop {
                                     .cursor_pointer()
                                     .text_sm()
                                     .text_color(rgb(INK_MUTED))
+                                    .drag_over::<DraggedNode>(|style, _, _, _| {
+                                        style.bg(rgb(ACCENT_SOFT))
+                                    })
+                                    .on_drop(cx.listener(|this, node: &DraggedNode, _, cx| {
+                                        this.move_explorer_node(
+                                            node.id.clone(),
+                                            Some(INBOX_ROOT_ID.to_owned()),
+                                            cx,
+                                        );
+                                    }))
                                     .when(inbox_selected, |row| {
                                         row.bg(rgb(SELECTION)).text_color(rgb(INK))
                                     })
@@ -3084,9 +3094,11 @@ const SEARCH_KIND_CHIPS: [(&str, Option<NodeKind>, &str); 6] = [
 ];
 
 /// 把 FTS 摘要按 « » 切分为 spans：标记内文本用 ACCENT 加粗，不显示标记原文。
+/// 正文中的换行等连续空白先折叠为单空格，保证结果行严格单行省略。
 fn render_search_snippet(snippet: &str) -> gpui::AnyElement {
+    let snippet = snippet.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut spans = Vec::new();
-    let mut rest = snippet;
+    let mut rest = snippet.as_str();
     while let Some(start) = rest.find('«') {
         if !rest[..start].is_empty() {
             spans.push((rest[..start].to_owned(), false));

@@ -29,10 +29,12 @@ native/
 │   ├── ideall-presentation/  # 无 GPUI 类型的导航、文案与设计 Token
 │   ├── ideall-storage/
 │   ├── ideall-sync/
+│   ├── ideall-sync-http/
 │   ├── ideall-agent/
 │   ├── ideall-acp/
 │   ├── ideall-secrets/
-│   └── ideall-updater/
+│   ├── ideall-updater/
+│   └── ideall-webmeta/       # 书签页面的有界 HTML 元数据抓取
 └── vendor/gpui-mobile/
 ```
 

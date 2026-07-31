@@ -77,6 +77,7 @@ Stable 二进制不会回看 Preview；运行期环境变量仅用于受控诊�
 - `ideall-protocol`：保持 V2 归档与同步 wire 兼容的纯契约。
 - `ideall-domain`：不依赖 UI/Storage 的 Engine 与 Workspace 逻辑。
 - `ideall-application`：创建、编辑、回收和恢复本地节点的跨 UI 用例。
+- `ideall-presentation`：无 GPUI 类型的导航、文案与设计 Token。
 - `ideall-agent`：实时 Grant、内容安全的本地 MCP 工具、OpenAI-compatible BYOK 传输与脱敏写操作审计。
 - `ideall-acp`：基于官方 Rust SDK `1.3.0` 的桌面 ACP v1 stdio 客户端；program/argv 直接启动、不经 shell，权限请求默认拒绝。
 - `ideall-storage`：SQLite 权威存储、V2 工作区归档校验及可恢复的原子导入。
@@ -84,6 +85,7 @@ Stable 二进制不会回看 Preview；运行期环境变量仅用于受控诊�
 - `ideall-sync-http`：带 Bearer 鉴权、响应预算和稳定错误映射的 V2 manifest/parts HTTP 适配器。
 - `ideall-secrets`：桌面系统凭据库、iOS Keychain 与 Android Keystore 的类型化适配；敏感值不进入 SQLite。
 - `ideall-updater`：严格解析并验证 minisign 更新清单，选择平台安装器并执行有预算的 SHA-256 下载。
+- `ideall-webmeta`：书签页面的有界 HTML 元数据抓取（标题、摘要、favicon 与 canonical），只依赖 ureq/url。
 
 原生笔记编辑器使用可逆 Markdown 块投影：标题、段落、引用、列表、任务、代码块与
 分隔线可直接编辑。桌面端提供 Notion 式居中文档画布、块工具栏、行内格式、`/` 命令、

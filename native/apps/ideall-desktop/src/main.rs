@@ -500,12 +500,16 @@ impl IdeallDesktop {
         } else {
             self.service.list_home().map(|mut items| {
                 match self.active_section.as_ref() {
-                    "活动" => items.sort_by(|left, right| {
-                        right
-                            .updated_at
-                            .cmp(&left.updated_at)
-                            .then_with(|| left.id.cmp(&right.id))
-                    }),
+                    "活动" => {
+                        // 最近更新只呈现内容项，目录容器不进入时间线。
+                        items.retain(|item| item.kind != NodeKind::Folder);
+                        items.sort_by(|left, right| {
+                            right
+                                .updated_at
+                                .cmp(&left.updated_at)
+                                .then_with(|| left.id.cmp(&right.id))
+                        });
+                    }
                     "浏览" => items
                         .retain(|item| matches!(item.kind, NodeKind::Bookmark | NodeKind::Feed)),
                     "应用" | "设置" => items.clear(),

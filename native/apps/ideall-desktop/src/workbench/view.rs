@@ -2298,11 +2298,6 @@ impl IdeallDesktop {
             .and_then(|parent_id| self.explorer.items.iter().find(|item| item.id == parent_id))
             .map(|item| item.title.clone())
             .unwrap_or_else(|| "我的资料库".to_owned());
-        let save_status = if self.editor.dirty {
-            "有未保存更改"
-        } else {
-            "已保存到本机"
-        };
 
         div()
             .flex_1()
@@ -2594,21 +2589,7 @@ impl IdeallDesktop {
                                     .bordered(false)
                                     .focus_bordered(false)
                                     .disabled(self.show_trash),
-                            )
-                            .when(is_note_document, |title| {
-                                title.child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap_2()
-                                        .text_xs()
-                                        .text_color(rgb(INK_FAINT))
-                                        .child(div().w(px(6.0)).h(px(6.0)).rounded_full().bg(rgb(
-                                            if self.editor.dirty { 0xd39a27 } else { ACCENT },
-                                        )))
-                                        .child(save_status),
-                                )
-                            }),
+                            ),
                     ),
             )
             .when(self.note_editor_available(), |editor| {

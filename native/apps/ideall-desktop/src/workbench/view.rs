@@ -874,7 +874,7 @@ impl IdeallDesktop {
                             .bg(rgb(SURFACE))
                             .font_weight(gpui::FontWeight::MEDIUM)
                     })
-                    .hover(|item| item.bg(rgb(HOVER)))
+                    .when(!selected, |item| item.hover(|item| item.bg(rgb(HOVER))))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.activate_tab(id.clone(), window, cx);
                     }))
@@ -2397,6 +2397,7 @@ impl IdeallDesktop {
                                             option
                                                 .text_color(rgb(INK_MUTED))
                                                 .cursor_pointer()
+                                                .hover(|option| option.text_color(rgb(INK)))
                                                 .on_click(cx.listener(|this, _, window, cx| {
                                                     this.toggle_note_preview(window, cx);
                                                 }))
@@ -2424,6 +2425,7 @@ impl IdeallDesktop {
                                             option
                                                 .text_color(rgb(INK_MUTED))
                                                 .cursor_pointer()
+                                                .hover(|option| option.text_color(rgb(INK)))
                                                 .on_click(cx.listener(|this, _, window, cx| {
                                                     this.toggle_note_preview(window, cx);
                                                 }))

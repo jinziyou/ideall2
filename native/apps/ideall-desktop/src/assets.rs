@@ -7,25 +7,32 @@ pub(super) struct IdeallAssets;
 
 #[derive(Clone, Copy)]
 pub(super) enum IdeallIcon {
+    BookmarkPlus,
     Brand,
+    ShieldCheck,
+    Wrench,
 }
 
 impl IconNamed for IdeallIcon {
     fn path(self) -> SharedString {
         match self {
+            Self::BookmarkPlus => "icons/bookmark-plus.svg",
             Self::Brand => "icons/brand.svg",
+            Self::ShieldCheck => "icons/shield-check.svg",
+            Self::Wrench => "icons/wrench.svg",
         }
         .into()
     }
 }
 
-const ICON_PATHS: [&str; 27] = [
+const ICON_PATHS: [&str; 31] = [
     "icons/arrow-left.svg",
     "icons/arrow-right.svg",
     "icons/arrow-up.svg",
     "icons/book-open.svg",
-    "icons/brand.svg",
+    "icons/bookmark-plus.svg",
     "icons/bot.svg",
+    "icons/brand.svg",
     "icons/calendar.svg",
     "icons/chevron-down.svg",
     "icons/chevron-right.svg",
@@ -39,6 +46,7 @@ const ICON_PATHS: [&str; 27] = [
     "icons/folder-open.svg",
     "icons/gallery-vertical-end.svg",
     "icons/globe.svg",
+    "icons/inbox.svg",
     "icons/layout-dashboard.svg",
     "icons/panel-left.svg",
     "icons/panel-right-close.svg",
@@ -47,6 +55,8 @@ const ICON_PATHS: [&str; 27] = [
     "icons/redo.svg",
     "icons/search.svg",
     "icons/settings-2.svg",
+    "icons/shield-check.svg",
+    "icons/wrench.svg",
 ];
 
 impl AssetSource for IdeallAssets {
@@ -56,6 +66,7 @@ impl AssetSource for IdeallAssets {
             "icons/arrow-right.svg" => Some(include_bytes!("../assets/icons/arrow-right.svg")),
             "icons/arrow-up.svg" => Some(include_bytes!("../assets/icons/arrow-up.svg")),
             "icons/book-open.svg" => Some(include_bytes!("../assets/icons/book-open.svg")),
+            "icons/bookmark-plus.svg" => Some(include_bytes!("../assets/icons/bookmark-plus.svg")),
             "icons/brand.svg" => Some(include_bytes!("../assets/icons/brand.svg")),
             "icons/bot.svg" => Some(include_bytes!("../assets/icons/bot.svg")),
             "icons/calendar.svg" => Some(include_bytes!("../assets/icons/calendar.svg")),
@@ -73,6 +84,7 @@ impl AssetSource for IdeallAssets {
                 Some(include_bytes!("../assets/icons/gallery-vertical-end.svg"))
             }
             "icons/globe.svg" => Some(include_bytes!("../assets/icons/globe.svg")),
+            "icons/inbox.svg" => Some(include_bytes!("../assets/icons/inbox.svg")),
             "icons/layout-dashboard.svg" => {
                 Some(include_bytes!("../assets/icons/layout-dashboard.svg"))
             }
@@ -87,6 +99,8 @@ impl AssetSource for IdeallAssets {
             "icons/redo.svg" => Some(include_bytes!("../assets/icons/redo.svg")),
             "icons/search.svg" => Some(include_bytes!("../assets/icons/search.svg")),
             "icons/settings-2.svg" => Some(include_bytes!("../assets/icons/settings-2.svg")),
+            "icons/shield-check.svg" => Some(include_bytes!("../assets/icons/shield-check.svg")),
+            "icons/wrench.svg" => Some(include_bytes!("../assets/icons/wrench.svg")),
             _ => None,
         };
         Ok(bytes.map(Cow::Borrowed))
@@ -129,6 +143,7 @@ mod tests {
             IconName::FolderOpen,
             IconName::GalleryVerticalEnd,
             IconName::Globe,
+            IconName::Inbox,
             IconName::LayoutDashboard,
             IconName::PanelLeft,
             IconName::PanelRightClose,
@@ -150,5 +165,12 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+        for icon in [
+            IdeallIcon::BookmarkPlus,
+            IdeallIcon::ShieldCheck,
+            IdeallIcon::Wrench,
+        ] {
+            assert!(IdeallAssets.load(icon.path().as_ref()).unwrap().is_some());
+        }
     }
 }

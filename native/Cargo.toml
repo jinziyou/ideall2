@@ -12,7 +12,6 @@ members = [
   "crates/ideall-secrets",
   "crates/ideall-storage",
   "crates/ideall-sync",
-  "crates/ideall-sync-http",
   "crates/ideall-updater",
 ]
 resolver = "2"

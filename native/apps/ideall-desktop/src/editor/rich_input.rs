@@ -40,9 +40,20 @@ pub(super) enum RichNavigation {
     Next,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RichInputMode {
+    /// Prose blocks edit a `NoteInlineDocument` with inline marks.
+    Rich,
+    /// Blocks without inline styles edit the raw Markdown source as plain
+    /// text: no mark parsing, no block-level navigation events, and
+    /// `markdown()` returns the text verbatim.
+    Plain,
+}
+
 pub(super) struct RichInputState {
     focus_handle: FocusHandle,
     document: NoteInlineDocument,
+    mode: RichInputMode,
     placeholder: SharedString,
     selected_range: Range<usize>,
     selection_reversed: bool,
@@ -61,9 +72,40 @@ impl RichInputState {
         placeholder: impl Into<SharedString>,
         cx: &mut Context<Self>,
     ) -> Self {
+        Self::with_document(
+            NoteInlineDocument::from_markdown(markdown.as_ref()),
+            RichInputMode::Rich,
+            placeholder,
+            cx,
+        )
+    }
+
+    pub(super) fn plain(
+        text: impl AsRef<str>,
+        placeholder: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::with_document(
+            NoteInlineDocument {
+                text: text.as_ref().to_owned(),
+                spans: Vec::new(),
+            },
+            RichInputMode::Plain,
+            placeholder,
+            cx,
+        )
+    }
+
+    fn with_document(
+        document: NoteInlineDocument,
+        mode: RichInputMode,
+        placeholder: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
-            document: NoteInlineDocument::from_markdown(markdown.as_ref()),
+            document,
+            mode,
             placeholder: placeholder.into(),
             selected_range: 0..0,
             selection_reversed: false,
@@ -77,12 +119,19 @@ impl RichInputState {
         }
     }
 
+    pub(super) fn mode(&self) -> RichInputMode {
+        self.mode
+    }
+
     pub(super) fn text(&self) -> &str {
         &self.document.text
     }
 
     pub(super) fn markdown(&self) -> String {
-        self.document.to_markdown()
+        match self.mode {
+            RichInputMode::Rich => self.document.to_markdown(),
+            RichInputMode::Plain => self.document.text.clone(),
+        }
     }
 
     pub(super) fn cursor_offset(&self) -> usize {
@@ -160,6 +209,9 @@ impl RichInputState {
     }
 
     pub(super) fn mention_query(&self) -> Option<(Range<usize>, String)> {
+        if self.mode == RichInputMode::Plain {
+            return None;
+        }
         let (range, query) = note_mention_query(&self.document.text, self.cursor_offset())?;
         let already_linked = self.document.spans.iter().any(|span| {
             matches!(span.mark, NoteInlineMark::Link(_))
@@ -219,6 +271,12 @@ impl RichInputState {
 
     pub(super) fn split_markdown_at_cursor(&self) -> (String, String) {
         let cursor = self.cursor_offset();
+        if self.mode == RichInputMode::Plain {
+            return (
+                self.document.text[..cursor].to_owned(),
+                self.document.text[cursor..].to_owned(),
+            );
+        }
         (
             self.document.slice(0..cursor).to_markdown(),
             self.document
@@ -243,10 +301,37 @@ impl RichInputState {
 
     pub(super) fn set_markdown(&mut self, markdown: impl AsRef<str>, cx: &mut Context<Self>) {
         let cursor = self.cursor_offset();
-        self.document = NoteInlineDocument::from_markdown(markdown.as_ref());
+        self.document = match self.mode {
+            RichInputMode::Rich => NoteInlineDocument::from_markdown(markdown.as_ref()),
+            RichInputMode::Plain => NoteInlineDocument {
+                text: markdown.as_ref().to_owned(),
+                spans: Vec::new(),
+            },
+        };
         self.move_to(cursor.min(self.document.text.len()), cx);
         self.marked_range = None;
         self.pending_marks = self.document.marks_at(self.cursor_offset());
+        cx.notify();
+    }
+
+    /// Switches between rich and plain editing. The current Markdown source
+    /// stays the block body and is reinterpreted under the new mode, matching
+    /// how block kind conversions carried text between the two former inputs.
+    pub(super) fn set_mode(&mut self, mode: RichInputMode, cx: &mut Context<Self>) {
+        if self.mode == mode {
+            return;
+        }
+        let markdown = self.markdown();
+        self.mode = mode;
+        self.set_markdown(markdown, cx);
+    }
+
+    pub(super) fn set_placeholder(
+        &mut self,
+        placeholder: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) {
+        self.placeholder = placeholder.into();
         cx.notify();
     }
 
@@ -394,7 +479,9 @@ impl RichInputState {
     fn move_left(&mut self, _: &MoveLeft, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             if self.cursor_offset() == 0 {
-                cx.emit(RichInputEvent::Navigate(RichNavigation::Previous));
+                if self.mode == RichInputMode::Rich {
+                    cx.emit(RichInputEvent::Navigate(RichNavigation::Previous));
+                }
                 return;
             }
             self.move_to(self.previous_boundary(self.cursor_offset()), cx);
@@ -406,7 +493,9 @@ impl RichInputState {
     fn move_right(&mut self, _: &MoveRight, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             if self.cursor_offset() == self.document.text.len() {
-                cx.emit(RichInputEvent::Navigate(RichNavigation::Next));
+                if self.mode == RichInputMode::Rich {
+                    cx.emit(RichInputEvent::Navigate(RichNavigation::Next));
+                }
                 return;
             }
             self.move_to(self.next_boundary(self.cursor_offset()), cx);
@@ -470,7 +559,9 @@ impl RichInputState {
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             if self.cursor_offset() == 0 {
-                cx.emit(RichInputEvent::BackspaceAtStart);
+                if self.mode == RichInputMode::Rich {
+                    cx.emit(RichInputEvent::BackspaceAtStart);
+                }
                 return;
             }
             self.select_to(self.previous_boundary(self.cursor_offset()), cx);
@@ -539,7 +630,7 @@ impl RichInputState {
     fn move_up(&mut self, _: &MoveUp, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(offset) = self.vertical_offset(false) {
             self.move_to(offset, cx);
-        } else {
+        } else if self.mode == RichInputMode::Rich {
             cx.emit(RichInputEvent::Navigate(RichNavigation::Previous));
         }
     }
@@ -547,7 +638,7 @@ impl RichInputState {
     fn move_down(&mut self, _: &MoveDown, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(offset) = self.vertical_offset(true) {
             self.move_to(offset, cx);
-        } else {
+        } else if self.mode == RichInputMode::Rich {
             cx.emit(RichInputEvent::Navigate(RichNavigation::Next));
         }
     }

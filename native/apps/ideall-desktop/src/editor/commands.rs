@@ -20,7 +20,7 @@ impl IdeallDesktop {
 
     pub(crate) fn note_editor_focused(&self, window: &Window, cx: &Context<Self>) -> bool {
         self.note_editor_available()
-            && self.editor.active_rich_input().map_or_else(
+            && self.editor.active_note_input().map_or_else(
                 || {
                     self.editor
                         .active_input()
@@ -30,34 +30,6 @@ impl IdeallDesktop {
                 },
                 |input| input.read(cx).focus_handle(cx).is_focused(window),
             )
-    }
-
-    pub(crate) fn handle_note_block_input(
-        &mut self,
-        id: u64,
-        event: &InputEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.editor.suppress_events {
-            return;
-        }
-        let Some(index) = self.editor.note_block_index(id) else {
-            return;
-        };
-        self.editor.link_editor = None;
-        self.editor.active_note_block = index;
-        match event {
-            InputEvent::Change => {
-                if !self.convert_note_markdown_shortcut(id, window, cx) {
-                    self.sync_note_blocks_to_source(window, cx);
-                }
-            }
-            InputEvent::PressEnter { secondary: false } => {
-                self.complete_note_block_after_enter(id, window, cx);
-            }
-            _ => {}
-        }
     }
 
     pub(super) fn handle_note_rich_input(
@@ -73,26 +45,21 @@ impl IdeallDesktop {
         let Some(index) = self.editor.note_block_index(id) else {
             return;
         };
+        if self.editor.note_blocks[index].input.read(cx).mode() == RichInputMode::Plain {
+            self.editor.link_editor = None;
+        }
         if !matches!(event, RichInputEvent::Change)
             && !self.editor.note_blocks[index]
-                .rich_input
-                .as_ref()
-                .is_some_and(|input| input.read(cx).focus_handle(cx).is_focused(window))
+                .input
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window)
         {
             return;
         }
         self.editor.active_note_block = index;
         match event {
             RichInputEvent::Change => {
-                let Some(rich_input) = self.editor.note_blocks[index].rich_input.clone() else {
-                    return;
-                };
-                let markdown = rich_input.read(cx).markdown();
-                self.editor.suppress_events = true;
-                self.editor.note_blocks[index]
-                    .input
-                    .update(cx, |input, cx| input.set_value(markdown, window, cx));
-                self.editor.suppress_events = false;
                 if !self.convert_note_markdown_shortcut(id, window, cx) {
                     self.sync_note_blocks_to_source(window, cx);
                 }
@@ -143,15 +110,12 @@ impl IdeallDesktop {
         if !self.ensure_note_editor_available(cx) {
             return;
         }
-        let rich_input = self.editor.active_rich_input().cloned();
-        let (value, cursor) = if let Some(input) = &rich_input {
+        let Some(input) = self.editor.active_note_input().cloned() else {
+            return;
+        };
+        let (value, cursor) = {
             let input = input.read(cx);
             (input.text().to_owned(), input.cursor_offset())
-        } else {
-            let input = self.editor.active_input();
-            let value = input.read(cx).value().to_string();
-            let cursor = byte_offset_for_position(&value, input.read(cx).cursor_position());
-            (value, cursor)
         };
         if note_slash_query(&value, cursor).is_none() {
             self.status = Some("斜杠命令已经失效，请重新输入 /".into());
@@ -159,12 +123,7 @@ impl IdeallDesktop {
             return;
         }
         self.editor.suppress_events = true;
-        if let Some(input) = rich_input {
-            input.update(cx, |input, cx| input.set_markdown("", cx));
-        }
-        self.editor
-            .active_input()
-            .update(cx, |input, cx| input.set_value("", window, cx));
+        input.update(cx, |input, cx| input.set_markdown("", cx));
         self.editor.suppress_events = false;
         self.convert_active_note_block(style, true, window, cx);
     }
@@ -392,7 +351,7 @@ impl IdeallDesktop {
         });
         self.editor.suppress_events = true;
         self.editor
-            .insert_note_block(index + 1, NoteEditorBlockSpec::paragraph(""), window, cx);
+            .insert_note_block(index + 1, NoteBlockSpec::paragraph(""), window, cx);
         self.editor.suppress_events = false;
         self.editor.active_note_block = index + 1;
         self.sync_note_blocks_to_source(window, cx);
@@ -423,8 +382,7 @@ impl IdeallDesktop {
         let Some(index) = self.editor.note_block_index(id) else {
             return;
         };
-        let NoteEditorBlockKind::Toggle { expanded } = &mut self.editor.note_blocks[index].kind
-        else {
+        let NoteBlockKind::Toggle { expanded } = &mut self.editor.note_blocks[index].kind else {
             return;
         };
         *expanded = !*expanded;
@@ -451,7 +409,7 @@ impl IdeallDesktop {
         let Some(index) = self.editor.note_block_index(id) else {
             return;
         };
-        let NoteEditorBlockKind::Callout { icon } = &mut self.editor.note_blocks[index].kind else {
+        let NoteBlockKind::Callout { icon } = &mut self.editor.note_blocks[index].kind else {
             return;
         };
         *icon = match icon.as_str() {
@@ -472,13 +430,13 @@ impl IdeallDesktop {
         let Some(index) = self.editor.note_block_index(id) else {
             return;
         };
-        if self.editor.note_blocks[index].kind != NoteEditorBlockKind::Bookmark {
+        if self.editor.note_blocks[index].kind != NoteBlockKind::Bookmark {
             return;
         }
         let value = self.editor.note_blocks[index]
             .input
             .read(cx)
-            .value()
+            .text()
             .trim()
             .to_owned();
         let safe = url::Url::parse(&value)
@@ -504,7 +462,7 @@ impl IdeallDesktop {
         let indices = self.editor.selected_note_block_indices();
         if indices
             .iter()
-            .any(|index| self.editor.note_blocks[*index].kind == NoteEditorBlockKind::Protected)
+            .any(|index| self.editor.note_blocks[*index].kind == NoteBlockKind::Protected)
         {
             self.report_note_edit_error(NoteEditError::ProtectedBlock, cx);
             return;
@@ -571,7 +529,7 @@ impl IdeallDesktop {
         let indices = self.editor.selected_note_block_indices();
         if indices
             .iter()
-            .any(|index| self.editor.note_blocks[*index].kind == NoteEditorBlockKind::Protected)
+            .any(|index| self.editor.note_blocks[*index].kind == NoteBlockKind::Protected)
         {
             self.report_note_edit_error(NoteEditError::ProtectedBlock, cx);
             return;
@@ -584,7 +542,7 @@ impl IdeallDesktop {
         }
         if self.editor.note_blocks.is_empty() {
             self.editor
-                .insert_note_block(0, NoteEditorBlockSpec::paragraph(""), window, cx);
+                .insert_note_block(0, NoteBlockSpec::paragraph(""), window, cx);
         }
         self.editor.active_note_block = next_index.min(self.editor.note_blocks.len() - 1);
         self.editor.selected_note_blocks.clear();
@@ -612,14 +570,14 @@ impl IdeallDesktop {
             .active_note_block
             .min(self.editor.note_blocks.len().saturating_sub(1));
         let block = &mut self.editor.note_blocks[index];
-        if block.kind == NoteEditorBlockKind::Protected {
+        if block.kind == NoteBlockKind::Protected {
             self.report_note_edit_error(NoteEditError::ProtectedBlock, cx);
             return;
         }
-        if block.kind == NoteEditorBlockKind::Todo {
+        if block.kind == NoteBlockKind::Todo {
             block.checked = !block.checked;
         } else {
-            block.kind = NoteEditorBlockKind::Todo;
+            block.kind = NoteBlockKind::Todo;
             block.checked = false;
         }
         self.sync_note_blocks_to_source(window, cx);
@@ -643,7 +601,7 @@ impl IdeallDesktop {
         let block = &mut self.editor.note_blocks[index];
         if !matches!(
             block.kind,
-            NoteEditorBlockKind::Bullet | NoteEditorBlockKind::Ordered | NoteEditorBlockKind::Todo
+            NoteBlockKind::Bullet | NoteBlockKind::Ordered | NoteBlockKind::Todo
         ) {
             self.status = Some("只有列表和待办块可以调整层级".into());
             cx.notify();
@@ -673,22 +631,23 @@ impl IdeallDesktop {
             .min(self.editor.note_blocks.len().saturating_sub(1));
         if matches!(
             self.editor.note_blocks[index].kind,
-            NoteEditorBlockKind::Protected
-                | NoteEditorBlockKind::Rule
-                | NoteEditorBlockKind::Equation
-                | NoteEditorBlockKind::Bookmark
+            NoteBlockKind::Protected
+                | NoteBlockKind::Rule
+                | NoteBlockKind::Equation
+                | NoteBlockKind::Bookmark
         ) {
             self.report_note_edit_error(NoteEditError::ProtectedBlock, cx);
             return;
         }
         if matches!(
             self.editor.note_blocks[index].kind,
-            NoteEditorBlockKind::Code { .. }
+            NoteBlockKind::Code { .. }
         ) {
             self.report_note_edit_error(NoteEditError::CodeBlock, cx);
             return;
         }
-        if let Some(input) = self.editor.note_blocks[index].rich_input.clone() {
+        let input = self.editor.note_blocks[index].input.clone();
+        if input.read(cx).mode() == RichInputMode::Rich {
             if style == NoteInlineStyle::Link {
                 let Some((range, existing_url)) = input.read(cx).link_target() else {
                     self.status = Some("请先选择要添加链接的文字".into());
@@ -733,8 +692,7 @@ impl IdeallDesktop {
             cx.notify();
             return;
         }
-        let input = self.editor.note_blocks[index].input.clone();
-        let original = input.read(cx).value().to_string();
+        let original = input.read(cx).text().to_owned();
         let selection_utf16 = input.update(cx, |input, cx| {
             input
                 .selected_text_range(false, window, cx)
@@ -745,10 +703,7 @@ impl IdeallDesktop {
                 byte_offset_for_utf16(&original, range.start)
                     ..byte_offset_for_utf16(&original, range.end)
             })
-            .unwrap_or_else(|| {
-                let cursor = byte_offset_for_position(&original, input.read(cx).cursor_position());
-                cursor..cursor
-            });
+            .unwrap_or_else(|| input.read(cx).cursor_offset()..input.read(cx).cursor_offset());
         let mut updated = original.clone();
         match toggle_note_inline_style(&mut updated, &mut selection, style) {
             Ok(true) => {
@@ -787,26 +742,27 @@ impl IdeallDesktop {
             .min(self.editor.note_blocks.len().saturating_sub(1));
         if matches!(
             self.editor.note_blocks[index].kind,
-            NoteEditorBlockKind::Protected
-                | NoteEditorBlockKind::Rule
-                | NoteEditorBlockKind::Equation
-                | NoteEditorBlockKind::Bookmark
+            NoteBlockKind::Protected
+                | NoteBlockKind::Rule
+                | NoteBlockKind::Equation
+                | NoteBlockKind::Bookmark
         ) {
             self.report_note_edit_error(NoteEditError::ProtectedBlock, cx);
             return;
         }
         if matches!(
             self.editor.note_blocks[index].kind,
-            NoteEditorBlockKind::Code { .. }
+            NoteBlockKind::Code { .. }
         ) {
             self.report_note_edit_error(NoteEditError::CodeBlock, cx);
             return;
         }
-        let Some(input) = self.editor.note_blocks[index].rich_input.clone() else {
+        let input = self.editor.note_blocks[index].input.clone();
+        if input.read(cx).mode() != RichInputMode::Rich {
             self.status = Some("文字颜色目前支持正文、标题、列表、待办、引用与提示块".into());
             cx.notify();
             return;
-        };
+        }
         let changed = input.update(cx, |input, cx| input.set_color(foreground, color, cx));
         input.update(cx, |input, _| input.focus(window));
         self.status = Some(
@@ -839,11 +795,7 @@ impl IdeallDesktop {
             cx.notify();
             return;
         };
-        let Some(input) = self.editor.note_blocks[index].rich_input.clone() else {
-            self.editor.link_editor = None;
-            cx.notify();
-            return;
-        };
+        let input = self.editor.note_blocks[index].input.clone();
         let url = self.editor.link_input.read(cx).value().trim().to_owned();
         let changed = input.update(cx, |input, cx| {
             input.apply_link(editor.range.clone(), &url, cx)
@@ -877,11 +829,7 @@ impl IdeallDesktop {
             cx.notify();
             return;
         };
-        let Some(input) = self.editor.note_blocks[index].rich_input.clone() else {
-            self.editor.link_editor = None;
-            cx.notify();
-            return;
-        };
+        let input = self.editor.note_blocks[index].input.clone();
         let changed = input.update(cx, |input, cx| input.remove_link(editor.range.clone(), cx));
         self.editor.link_editor = None;
         input.update(cx, |input, _| input.focus(window));
@@ -900,7 +848,12 @@ impl IdeallDesktop {
         let block_id = self.editor.link_editor.take().map(|editor| editor.block_id);
         if let Some(input) = block_id
             .and_then(|id| self.editor.note_block_index(id))
-            .and_then(|index| self.editor.note_blocks[index].rich_input.clone())
+            .and_then(|index| {
+                self.editor
+                    .note_blocks
+                    .get(index)
+                    .map(|block| block.input.clone())
+            })
         {
             input.update(cx, |input, _| input.focus(window));
         }
@@ -946,103 +899,6 @@ impl IdeallDesktop {
         window.dispatch_action(Box::new(Redo), cx);
     }
 
-    fn complete_note_block_after_enter(
-        &mut self,
-        id: u64,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(index) = self.editor.note_block_index(id) else {
-            return;
-        };
-        if matches!(
-            self.editor.note_blocks[index].kind,
-            NoteEditorBlockKind::Code { .. }
-                | NoteEditorBlockKind::Equation
-                | NoteEditorBlockKind::Protected
-        ) {
-            return;
-        }
-        let input = self.editor.note_blocks[index].input.clone();
-        let original = input.read(cx).value().to_string();
-        let cursor = byte_offset_for_position(&original, input.read(cx).cursor_position());
-        let Some(split_at) = cursor.checked_sub(1).filter(|offset| {
-            original
-                .as_bytes()
-                .get(*offset)
-                .is_some_and(|byte| *byte == b'\n')
-        }) else {
-            return;
-        };
-
-        if let Some(query) = note_slash_query(&original, split_at)
-            && let Some(command) = note_slash_commands(query).into_iter().next()
-        {
-            self.editor.suppress_events = true;
-            input.update(cx, |input, cx| input.set_value("", window, cx));
-            self.editor.suppress_events = false;
-            self.editor.active_note_block = index;
-            self.convert_active_note_block(command.style, true, window, cx);
-            self.status = Some(format!("已插入{}", command.label).into());
-            cx.notify();
-            return;
-        }
-
-        let left = original[..split_at].to_owned();
-        let right = original[cursor..].to_owned();
-        let current_kind = self.editor.note_blocks[index].kind.clone();
-        if matches!(
-            current_kind,
-            NoteEditorBlockKind::Bullet | NoteEditorBlockKind::Ordered | NoteEditorBlockKind::Todo
-        ) && left.is_empty()
-            && right.is_empty()
-        {
-            self.editor.suppress_events = true;
-            input.update(cx, |input, cx| input.set_value("", window, cx));
-            self.editor.note_blocks[index].kind = NoteEditorBlockKind::Paragraph;
-            self.editor.note_blocks[index].indent = 0;
-            self.editor.note_blocks[index].checked = false;
-            self.editor.suppress_events = false;
-            self.editor.active_note_block = index;
-            self.sync_note_blocks_to_source(window, cx);
-            input.update(cx, |input, cx| input.focus(window, cx));
-            cx.notify();
-            return;
-        }
-        let continuation = match current_kind {
-            NoteEditorBlockKind::Bullet => NoteEditorBlockSpec {
-                kind: NoteEditorBlockKind::Bullet,
-                text: right,
-                indent: self.editor.note_blocks[index].indent,
-                checked: false,
-            },
-            NoteEditorBlockKind::Ordered => NoteEditorBlockSpec {
-                kind: NoteEditorBlockKind::Ordered,
-                text: right,
-                indent: self.editor.note_blocks[index].indent,
-                checked: false,
-            },
-            NoteEditorBlockKind::Todo => NoteEditorBlockSpec {
-                kind: NoteEditorBlockKind::Todo,
-                text: right,
-                indent: self.editor.note_blocks[index].indent,
-                checked: false,
-            },
-            _ => NoteEditorBlockSpec::paragraph(right),
-        };
-        self.editor.suppress_events = true;
-        input.update(cx, |input, cx| input.set_value(left, window, cx));
-        let continuation_id = self
-            .editor
-            .insert_note_block(index + 1, continuation, window, cx);
-        self.editor.suppress_events = false;
-        self.editor.active_note_block = index + 1;
-        self.sync_note_blocks_to_source(window, cx);
-        self.editor.focus_active_editor(window, cx);
-        self.focus_note_block_on_next_frame(continuation_id, window, cx);
-        cx.notify();
-    }
-
     fn focus_note_block_on_next_frame(&self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
         let desktop = cx.entity();
         window.on_next_frame(move |window, cx| {
@@ -1067,9 +923,17 @@ impl IdeallDesktop {
         let Some(index) = self.editor.note_block_index(id) else {
             return;
         };
-        let Some(input) = self.editor.note_blocks[index].rich_input.clone() else {
+        let input = self.editor.note_blocks[index].input.clone();
+        // Code, equation and protected blocks keep Enter as a plain newline.
+        if matches!(
+            self.editor.note_blocks[index].kind,
+            NoteBlockKind::Code { .. } | NoteBlockKind::Equation | NoteBlockKind::Protected
+        ) {
+            input.update(cx, |input, cx| {
+                input.replace_text_in_range(None, "\n", window, cx)
+            });
             return;
-        };
+        }
         let plain = input.read(cx).text().to_owned();
         let cursor = input.read(cx).cursor_offset();
 
@@ -1085,9 +949,6 @@ impl IdeallDesktop {
         {
             self.editor.suppress_events = true;
             input.update(cx, |input, cx| input.set_markdown("", cx));
-            self.editor.note_blocks[index]
-                .input
-                .update(cx, |input, cx| input.set_value("", window, cx));
             self.editor.suppress_events = false;
             self.editor.active_note_block = index;
             self.convert_active_note_block(command.style, true, window, cx);
@@ -1099,13 +960,13 @@ impl IdeallDesktop {
         let current_kind = self.editor.note_blocks[index].kind.clone();
         if matches!(
             current_kind,
-            NoteEditorBlockKind::Bullet | NoteEditorBlockKind::Ordered | NoteEditorBlockKind::Todo
+            NoteBlockKind::Bullet | NoteBlockKind::Ordered | NoteBlockKind::Todo
         ) && plain.is_empty()
         {
-            self.editor.note_blocks[index].kind = NoteEditorBlockKind::Paragraph;
+            self.editor.note_blocks[index].kind = NoteBlockKind::Paragraph;
             self.editor.note_blocks[index].indent = 0;
             self.editor.note_blocks[index].checked = false;
-            self.editor.refresh_note_block_rich_input(index, window, cx);
+            self.editor.refresh_note_block_input(index, cx);
             self.sync_note_blocks_to_source(window, cx);
             self.editor.focus_active_editor(window, cx);
             cx.notify();
@@ -1114,31 +975,28 @@ impl IdeallDesktop {
 
         let (left, right) = input.read(cx).split_markdown_at_cursor();
         let continuation = match current_kind {
-            NoteEditorBlockKind::Bullet => NoteEditorBlockSpec {
-                kind: NoteEditorBlockKind::Bullet,
+            NoteBlockKind::Bullet => NoteBlockSpec {
+                kind: NoteBlockKind::Bullet,
                 text: right,
                 indent: self.editor.note_blocks[index].indent,
                 checked: false,
             },
-            NoteEditorBlockKind::Ordered => NoteEditorBlockSpec {
-                kind: NoteEditorBlockKind::Ordered,
+            NoteBlockKind::Ordered => NoteBlockSpec {
+                kind: NoteBlockKind::Ordered,
                 text: right,
                 indent: self.editor.note_blocks[index].indent,
                 checked: false,
             },
-            NoteEditorBlockKind::Todo => NoteEditorBlockSpec {
-                kind: NoteEditorBlockKind::Todo,
+            NoteBlockKind::Todo => NoteBlockSpec {
+                kind: NoteBlockKind::Todo,
                 text: right,
                 indent: self.editor.note_blocks[index].indent,
                 checked: false,
             },
-            _ => NoteEditorBlockSpec::paragraph(right),
+            _ => NoteBlockSpec::paragraph(right),
         };
         self.editor.suppress_events = true;
         input.update(cx, |input, cx| input.set_markdown(&left, cx));
-        self.editor.note_blocks[index]
-            .input
-            .update(cx, |input, cx| input.set_value(left, window, cx));
         let continuation_id = self
             .editor
             .insert_note_block(index + 1, continuation, window, cx);
@@ -1171,27 +1029,14 @@ impl IdeallDesktop {
         };
         self.editor.active_note_block = target;
         let block = &self.editor.note_blocks[target];
-        if let Some(input) = &block.rich_input {
-            let offset = match direction {
-                RichNavigation::Previous => input.read(cx).text().len(),
-                RichNavigation::Next => 0,
-            };
-            input.update(cx, |input, cx| {
-                input.set_cursor_offset(offset, cx);
-                input.focus(window);
-            });
-        } else {
-            let text = block.input.read(cx).value().to_string();
-            let offset = match direction {
-                RichNavigation::Previous => text.len(),
-                RichNavigation::Next => 0,
-            };
-            let position = position_for_byte_offset(&text, offset);
-            block.input.update(cx, |input, cx| {
-                input.set_cursor_position(position, window, cx);
-                input.focus(window, cx);
-            });
-        }
+        let offset = match direction {
+            RichNavigation::Previous => block.input.read(cx).text().len(),
+            RichNavigation::Next => 0,
+        };
+        block.input.update(cx, |input, cx| {
+            input.set_cursor_offset(offset, cx);
+            input.focus(window);
+        });
         cx.notify();
     }
 
@@ -1207,22 +1052,19 @@ impl IdeallDesktop {
         let Some(previous_index) = index.checked_sub(1) else {
             return;
         };
-        let Some(previous) = self.editor.note_blocks[previous_index].rich_input.clone() else {
+        if !self.editor.note_blocks[previous_index]
+            .kind
+            .supports_inline_rich_text()
+        {
             self.navigate_from_rich_note_block(id, RichNavigation::Previous, window, cx);
             return;
-        };
-        let Some(current) = self.editor.note_blocks[index].rich_input.as_ref() else {
-            return;
-        };
-        let current_markdown = current.read(cx).markdown();
+        }
+        let previous = self.editor.note_blocks[previous_index].input.clone();
+        let current_markdown = self.editor.note_blocks[index].input.read(cx).markdown();
 
         self.editor.suppress_events = true;
         let join_offset =
             previous.update(cx, |input, cx| input.append_markdown(current_markdown, cx));
-        let merged_markdown = previous.read(cx).markdown();
-        self.editor.note_blocks[previous_index]
-            .input
-            .update(cx, |input, cx| input.set_value(merged_markdown, window, cx));
         self.editor.note_blocks.remove(index);
         self.editor.suppress_events = false;
         self.editor.active_note_block = previous_index;
@@ -1246,11 +1088,11 @@ impl IdeallDesktop {
         let Some(index) = self.editor.note_block_index(id) else {
             return false;
         };
-        if self.editor.note_blocks[index].kind != NoteEditorBlockKind::Paragraph {
+        if self.editor.note_blocks[index].kind != NoteBlockKind::Paragraph {
             return false;
         }
         let input = self.editor.note_blocks[index].input.clone();
-        let value = input.read(cx).value().to_string();
+        let value = input.read(cx).markdown();
         let style = match value.as_str() {
             "# " => NoteBlockStyle::Heading1,
             "## " => NoteBlockStyle::Heading2,
@@ -1265,7 +1107,7 @@ impl IdeallDesktop {
             _ => return false,
         };
         self.editor.suppress_events = true;
-        input.update(cx, |input, cx| input.set_value("", window, cx));
+        input.update(cx, |input, cx| input.set_markdown("", cx));
         self.editor.suppress_events = false;
         self.editor.active_note_block = index;
         self.convert_active_note_block(style, false, window, cx);
@@ -1286,31 +1128,27 @@ impl IdeallDesktop {
             .editor
             .active_note_block
             .min(self.editor.note_blocks.len() - 1);
-        if self.editor.note_blocks[index].kind == NoteEditorBlockKind::Protected {
+        if self.editor.note_blocks[index].kind == NoteBlockKind::Protected {
             self.report_note_edit_error(NoteEditError::ProtectedBlock, cx);
             return;
         }
         let kind = note_block_kind_for_style(style);
         self.editor.note_blocks[index].kind = kind.clone();
-        self.editor.refresh_note_block_rich_input(index, window, cx);
+        self.editor.refresh_note_block_input(index, cx);
         self.editor.note_blocks[index].checked = false;
         if !matches!(
             kind,
-            NoteEditorBlockKind::Bullet | NoteEditorBlockKind::Ordered | NoteEditorBlockKind::Todo
+            NoteBlockKind::Bullet | NoteBlockKind::Ordered | NoteBlockKind::Todo
         ) {
             self.editor.note_blocks[index].indent = 0;
         }
-        if kind == NoteEditorBlockKind::Rule {
+        if kind == NoteBlockKind::Rule {
             self.editor.suppress_events = true;
             self.editor.note_blocks[index]
                 .input
-                .update(cx, |input, cx| input.set_value("", window, cx));
-            self.editor.insert_note_block(
-                index + 1,
-                NoteEditorBlockSpec::paragraph(""),
-                window,
-                cx,
-            );
+                .update(cx, |input, cx| input.set_markdown("", cx));
+            self.editor
+                .insert_note_block(index + 1, NoteBlockSpec::paragraph(""), window, cx);
             self.editor.suppress_events = false;
             self.editor.active_note_block = index + 1;
         }
@@ -1343,7 +1181,7 @@ impl IdeallDesktop {
 
     fn apply_note_input_update(
         &mut self,
-        input: &Entity<InputState>,
+        input: &Entity<RichInputState>,
         original: &str,
         updated: &str,
         cursor: usize,
@@ -1358,8 +1196,8 @@ impl IdeallDesktop {
         let replacement = &updated[new_range];
         input.update(cx, |input, cx| {
             input.replace_text_in_range(Some(range_utf16), replacement, window, cx);
-            input.set_cursor_position(position_for_byte_offset(updated, cursor), window, cx);
-            input.focus(window, cx);
+            input.set_cursor_offset(cursor, cx);
+            input.focus(window);
         });
     }
 
@@ -1386,26 +1224,26 @@ impl IdeallDesktop {
     }
 }
 
-fn note_block_kind_for_style(style: NoteBlockStyle) -> NoteEditorBlockKind {
+fn note_block_kind_for_style(style: NoteBlockStyle) -> NoteBlockKind {
     match style {
-        NoteBlockStyle::Paragraph => NoteEditorBlockKind::Paragraph,
-        NoteBlockStyle::Heading1 => NoteEditorBlockKind::Heading(1),
-        NoteBlockStyle::Heading2 => NoteEditorBlockKind::Heading(2),
-        NoteBlockStyle::Heading3 => NoteEditorBlockKind::Heading(3),
-        NoteBlockStyle::Quote => NoteEditorBlockKind::Quote,
-        NoteBlockStyle::Bullet => NoteEditorBlockKind::Bullet,
-        NoteBlockStyle::Ordered => NoteEditorBlockKind::Ordered,
-        NoteBlockStyle::Todo => NoteEditorBlockKind::Todo,
-        NoteBlockStyle::Code => NoteEditorBlockKind::Code {
+        NoteBlockStyle::Paragraph => NoteBlockKind::Paragraph,
+        NoteBlockStyle::Heading1 => NoteBlockKind::Heading(1),
+        NoteBlockStyle::Heading2 => NoteBlockKind::Heading(2),
+        NoteBlockStyle::Heading3 => NoteBlockKind::Heading(3),
+        NoteBlockStyle::Quote => NoteBlockKind::Quote,
+        NoteBlockStyle::Bullet => NoteBlockKind::Bullet,
+        NoteBlockStyle::Ordered => NoteBlockKind::Ordered,
+        NoteBlockStyle::Todo => NoteBlockKind::Todo,
+        NoteBlockStyle::Code => NoteBlockKind::Code {
             language: String::new(),
         },
-        NoteBlockStyle::Rule => NoteEditorBlockKind::Rule,
-        NoteBlockStyle::Callout => NoteEditorBlockKind::Callout {
+        NoteBlockStyle::Rule => NoteBlockKind::Rule,
+        NoteBlockStyle::Callout => NoteBlockKind::Callout {
             icon: "💡".into()
         },
-        NoteBlockStyle::Toggle => NoteEditorBlockKind::Toggle { expanded: true },
-        NoteBlockStyle::Equation => NoteEditorBlockKind::Equation,
-        NoteBlockStyle::Bookmark => NoteEditorBlockKind::Bookmark,
+        NoteBlockStyle::Toggle => NoteBlockKind::Toggle { expanded: true },
+        NoteBlockStyle::Equation => NoteBlockKind::Equation,
+        NoteBlockStyle::Bookmark => NoteBlockKind::Bookmark,
     }
 }
 
@@ -1481,6 +1319,7 @@ mod tests {
             updated_at: 0,
             deleted: false,
             depth: 0,
+            snippet: String::new(),
         };
         let items = vec![
             item("current", "Project current"),

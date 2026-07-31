@@ -9,8 +9,6 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "pnpm native:dev",
-    "build": "pnpm native:build:desktop",
     "app:dev": "pnpm native:dev",
     "app:build": "pnpm native:build:desktop",
     "lint:actions": "node scripts/lint-actions.mjs",
@@ -31,7 +29,7 @@
     "verify:checks": "pnpm format:check && pnpm lint:actions && pnpm lint:docs && pnpm version:check && pnpm test:scripts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test:scripts": "node scripts/run-script-tests.mjs",
+    "test:scripts": "node --test --test-concurrency=1 scripts/*.test.mjs",
     "bump": "node scripts/bump-version.mjs",
     "version:check": "node scripts/check-version.mjs"
   },

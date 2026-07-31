@@ -6,18 +6,92 @@ use std::{
 
 use gpui_component::input::Position;
 
-mod actions;
-mod blocks;
 mod commands;
 mod rich_input;
 mod view;
 
-use blocks::{
-    DraggedNoteBlocks, NoteEditorBlock, NoteEditorBlockKind, NoteEditorBlockSpec,
-    note_blocks_markdown, note_blocks_plain_text, parse_note_blocks,
-};
-use rich_input::{RichInputEvent, RichInputState, RichNavigation};
+use rich_input::{RichInputEvent, RichInputMode, RichInputState, RichNavigation};
 pub(crate) use view::{EditorMode, engine_icon};
+
+pub(super) struct NoteEditorBlock {
+    pub(super) id: u64,
+    pub(super) kind: NoteBlockKind,
+    pub(in crate::editor) input: Entity<RichInputState>,
+    pub(super) indent: usize,
+    pub(super) checked: bool,
+}
+
+impl NoteEditorBlock {
+    pub(super) fn to_spec(&self, cx: &Context<IdeallDesktop>) -> NoteBlockSpec {
+        NoteBlockSpec {
+            kind: self.kind.clone(),
+            text: self.input.read(cx).markdown(),
+            indent: self.indent,
+            checked: self.checked,
+        }
+    }
+
+    pub(super) fn markdown(&self, cx: &Context<IdeallDesktop>) -> String {
+        render_note_block(&self.to_spec(cx))
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct DraggedNoteBlocks {
+    pub(super) ids: Vec<u64>,
+}
+
+impl Render for DraggedNoteBlocks {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(BORDER_STRONG))
+            .bg(rgb(SURFACE_RAISED))
+            .text_sm()
+            .text_color(rgb(INK))
+            .child(if self.ids.len() == 1 {
+                "移动 1 个内容块".to_owned()
+            } else {
+                format!("移动 {} 个内容块", self.ids.len())
+            })
+    }
+}
+
+pub(super) fn note_block_placeholder(kind: &NoteBlockKind) -> &'static str {
+    match kind {
+        NoteBlockKind::Code { .. } => "输入代码；Enter 换行",
+        NoteBlockKind::Callout { .. } => "输入需要强调的内容",
+        NoteBlockKind::Toggle { .. } => "第一行作为摘要，其余内容可折叠",
+        NoteBlockKind::Equation => "输入 LaTeX 公式",
+        NoteBlockKind::Bookmark => "输入完整的 https:// 地址",
+        _ => "输入内容，键入 / 选择块类型",
+    }
+}
+
+pub(super) fn note_blocks_markdown(
+    blocks: &[NoteEditorBlock],
+    cx: &Context<IdeallDesktop>,
+) -> String {
+    blocks
+        .iter()
+        .map(|block| block.markdown(cx))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub(super) fn note_blocks_plain_text(
+    blocks: &[NoteEditorBlock],
+    cx: &Context<IdeallDesktop>,
+) -> String {
+    blocks
+        .iter()
+        .map(|block| block.input.read(cx).text().to_owned())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 /// Owns the complete state of the active desktop editor workspace.
 ///
@@ -45,9 +119,9 @@ pub(super) struct EditorWorkspace {
     note_selection_anchor: Option<usize>,
     note_block_subscriptions: Vec<Subscription>,
     next_note_block_id: u64,
-    note_undo: Vec<Vec<NoteEditorBlockSpec>>,
-    note_redo: Vec<Vec<NoteEditorBlockSpec>>,
-    note_snapshot: Vec<NoteEditorBlockSpec>,
+    note_undo: Vec<Vec<NoteBlockSpec>>,
+    note_redo: Vec<Vec<NoteBlockSpec>>,
+    note_snapshot: Vec<NoteBlockSpec>,
     note_history_suspended: bool,
     pub(super) link_editor: Option<NoteLinkEditor>,
     sessions: HashMap<String, DocumentSession>,
@@ -264,7 +338,7 @@ impl EditorWorkspace {
             return;
         };
         let cursor = self
-            .active_rich_input()
+            .active_note_input()
             .map(|input| {
                 let input = input.read(cx);
                 position_for_byte_offset(input.text(), input.cursor_offset())
@@ -294,7 +368,7 @@ impl EditorWorkspace {
                 .note_block
                 .min(self.note_blocks.len().saturating_sub(1));
         }
-        if let Some(input) = self.active_rich_input() {
+        if let Some(input) = self.active_note_input() {
             let offset = byte_offset_for_position(input.read(cx).text(), cursor);
             input.update(cx, |input, cx| input.set_cursor_offset(offset, cx));
         } else {
@@ -309,59 +383,64 @@ impl EditorWorkspace {
     }
 
     pub(super) fn active_input(&self) -> &Entity<InputState> {
-        if self.selected_kind == Some(NodeKind::Note) && !self.note_blocks.is_empty() {
-            &self.note_blocks[self
-                .active_note_block
-                .min(self.note_blocks.len().saturating_sub(1))]
-            .input
-        } else if self.uses_text_input() {
+        if self.uses_text_input() {
             &self.text_input
         } else {
             &self.body_input
         }
     }
 
+    /// The single input of the active note block, if a note with blocks is
+    /// loaded. Prose blocks hold a rich-mode input; all other blocks hold a
+    /// plain-mode one.
+    pub(in crate::editor) fn active_note_input(&self) -> Option<&Entity<RichInputState>> {
+        if self.selected_kind != Some(NodeKind::Note) || self.note_blocks.is_empty() {
+            return None;
+        }
+        Some(
+            &self.note_blocks[self
+                .active_note_block
+                .min(self.note_blocks.len().saturating_sub(1))]
+            .input,
+        )
+    }
+
+    /// The active note block input when the block edits inline rich text.
     fn active_rich_input(&self) -> Option<&Entity<RichInputState>> {
         if self.selected_kind != Some(NodeKind::Note) || self.note_blocks.is_empty() {
             return None;
         }
-        self.note_blocks[self
+        let block = &self.note_blocks[self
             .active_note_block
-            .min(self.note_blocks.len().saturating_sub(1))]
-        .rich_input
-        .as_ref()
+            .min(self.note_blocks.len().saturating_sub(1))];
+        block
+            .kind
+            .supports_inline_rich_text()
+            .then_some(&block.input)
     }
 
     pub(super) fn active_note_query_context(
         &self,
         cx: &Context<IdeallDesktop>,
     ) -> Option<(String, usize)> {
-        if let Some(input) = self.active_rich_input() {
-            let input = input.read(cx);
-            return Some((input.text().to_owned(), input.cursor_offset()));
-        }
-        if self.selected_kind == Some(NodeKind::Note) && !self.note_blocks.is_empty() {
-            let input = self.active_input().read(cx);
-            let text = input.value().to_string();
-            let cursor = byte_offset_for_position(&text, input.cursor_position());
-            return Some((text, cursor));
-        }
-        None
+        let input = self.active_note_input()?.read(cx);
+        Some((input.text().to_owned(), input.cursor_offset()))
     }
 
     pub(super) fn active_note_mention_context(
         &self,
         cx: &Context<IdeallDesktop>,
     ) -> Option<(Range<usize>, String)> {
-        if let Some(input) = self.active_rich_input() {
-            return input.read(cx).mention_query();
+        let input = self.active_note_input()?.read(cx);
+        if input.mode() == RichInputMode::Rich {
+            return input.mention_query();
         }
-        let (text, cursor) = self.active_note_query_context(cx)?;
-        note_mention_query(&text, cursor).map(|(range, query)| (range, query.to_owned()))
+        note_mention_query(input.text(), input.cursor_offset())
+            .map(|(range, query)| (range, query.to_owned()))
     }
 
     pub(super) fn focus_active_editor(&self, window: &mut Window, cx: &mut Context<IdeallDesktop>) {
-        if let Some(input) = self.active_rich_input() {
+        if let Some(input) = self.active_note_input() {
             input.update(cx, |input, _| input.focus(window));
         } else {
             self.active_input()
@@ -392,21 +471,17 @@ impl EditorWorkspace {
         let active = self
             .active_note_block
             .min(self.note_blocks.len().saturating_sub(1));
-        let cursor = self.note_blocks[active]
-            .rich_input
-            .as_ref()
-            .map(|input| {
-                let input = input.read(cx);
-                position_for_byte_offset(input.text(), input.cursor_offset())
-            })
-            .unwrap_or_else(|| self.note_blocks[active].input.read(cx).cursor_position());
+        let cursor = {
+            let input = self.note_blocks[active].input.read(cx);
+            position_for_byte_offset(input.text(), input.cursor_offset())
+        };
         let preceding_lines = self.note_blocks[..active]
             .iter()
             .map(|block| {
                 block
                     .input
                     .read(cx)
-                    .value()
+                    .text()
                     .bytes()
                     .filter(|byte| *byte == b'\n')
                     .count()
@@ -438,25 +513,14 @@ impl EditorWorkspace {
         cx: &mut Context<IdeallDesktop>,
     ) -> Option<Position> {
         for (index, block) in self.note_blocks.iter().enumerate() {
-            let text = block
-                .rich_input
-                .as_ref()
-                .map(|input| input.read(cx).text().to_owned())
-                .unwrap_or_else(|| block.input.read(cx).value().to_string());
+            let text = block.input.read(cx).text().to_owned();
             if offset <= text.len() {
                 let position = position_for_byte_offset(&text, offset);
                 self.active_note_block = index;
-                if let Some(input) = &block.rich_input {
-                    input.update(cx, |input, cx| {
-                        input.set_cursor_offset(offset, cx);
-                        input.focus(window);
-                    });
-                } else {
-                    block.input.update(cx, |input, cx| {
-                        input.set_cursor_position(position, window, cx);
-                        input.focus(window, cx);
-                    });
-                }
+                block.input.update(cx, |input, cx| {
+                    input.set_cursor_offset(offset, cx);
+                    input.focus(window);
+                });
                 return Some(position);
             }
             offset = offset.checked_sub(text.len() + 1)?;
@@ -474,33 +538,12 @@ impl EditorWorkspace {
         let mut count = 0;
         self.suppress_events = true;
         for block in &self.note_blocks {
-            if matches!(
-                block.kind,
-                NoteEditorBlockKind::Protected | NoteEditorBlockKind::Rule
-            ) {
+            if matches!(block.kind, NoteBlockKind::Protected | NoteBlockKind::Rule) {
                 continue;
             }
-            if let Some(input) = &block.rich_input {
-                let matches =
-                    input.update(cx, |input, cx| input.replace_all(query, replacement, cx));
-                if matches > 0 {
-                    count += matches;
-                    let markdown = input.read(cx).markdown();
-                    block.input.update(cx, |input, cx| {
-                        input.set_value(markdown, window, cx);
-                    });
-                }
-                continue;
-            }
-            let value = block.input.read(cx).value().to_string();
-            let matches = value.match_indices(query).count();
-            if matches == 0 {
-                continue;
-            }
-            count += matches;
-            block.input.update(cx, |input, cx| {
-                input.set_value(value.replace(query, replacement), window, cx);
-            });
+            count += block
+                .input
+                .update(cx, |input, cx| input.replace_all(query, replacement, cx));
         }
         if count > 0 {
             self.commit_note_history(cx);
@@ -512,7 +555,7 @@ impl EditorWorkspace {
         count
     }
 
-    fn note_snapshot(&self, cx: &Context<IdeallDesktop>) -> Vec<NoteEditorBlockSpec> {
+    fn note_snapshot(&self, cx: &Context<IdeallDesktop>) -> Vec<NoteBlockSpec> {
         self.note_blocks
             .iter()
             .map(|block| block.to_spec(cx))
@@ -565,7 +608,7 @@ impl EditorWorkspace {
 
     fn restore_note_snapshot(
         &mut self,
-        snapshot: Vec<NoteEditorBlockSpec>,
+        snapshot: Vec<NoteBlockSpec>,
         window: &mut Window,
         cx: &mut Context<IdeallDesktop>,
     ) {
@@ -625,7 +668,7 @@ impl EditorWorkspace {
 
     fn push_note_block(
         &mut self,
-        block: NoteEditorBlockSpec,
+        block: NoteBlockSpec,
         window: &mut Window,
         cx: &mut Context<IdeallDesktop>,
     ) -> u64 {
@@ -635,49 +678,34 @@ impl EditorWorkspace {
     fn insert_note_block(
         &mut self,
         index: usize,
-        block: NoteEditorBlockSpec,
+        block: NoteBlockSpec,
         window: &mut Window,
         cx: &mut Context<IdeallDesktop>,
     ) -> u64 {
         let id = self.next_note_block_id;
         self.next_note_block_id = self.next_note_block_id.wrapping_add(1).max(1);
-        let placeholder = block.kind.placeholder();
-        let rich_input = block
-            .kind
-            .supports_inline_rich_text()
-            .then(|| cx.new(|cx| RichInputState::new(&block.text, placeholder, cx)));
+        let placeholder = note_block_placeholder(&block.kind);
         let input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .auto_grow(1, 16)
-                .soft_wrap(true)
-                .default_value(block.text)
-                .placeholder(placeholder)
+            if block.kind.supports_inline_rich_text() {
+                RichInputState::new(&block.text, placeholder, cx)
+            } else {
+                RichInputState::plain(&block.text, placeholder, cx)
+            }
         });
         let subscription = cx.subscribe_in(
             &input,
             window,
-            move |this, _, event: &InputEvent, window, cx| {
-                this.handle_note_block_input(id, event, window, cx);
+            move |this, _, event: &RichInputEvent, window, cx| {
+                this.handle_note_rich_input(id, event, window, cx);
             },
         );
         self.note_block_subscriptions.push(subscription);
-        if let Some(rich_input) = &rich_input {
-            let subscription = cx.subscribe_in(
-                rich_input,
-                window,
-                move |this, _, event: &RichInputEvent, window, cx| {
-                    this.handle_note_rich_input(id, event, window, cx);
-                },
-            );
-            self.note_block_subscriptions.push(subscription);
-        }
         self.note_blocks.insert(
             index.min(self.note_blocks.len()),
             NoteEditorBlock {
                 id,
                 kind: block.kind,
                 input,
-                rich_input,
                 indent: block.indent,
                 checked: block.checked,
             },
@@ -691,51 +719,32 @@ impl EditorWorkspace {
         cx: &mut Context<IdeallDesktop>,
     ) {
         for block in &self.note_blocks {
-            if let Some(input) = &block.rich_input {
-                input.update(cx, |input, cx| input.set_read_only(read_only, cx));
-            }
+            block
+                .input
+                .update(cx, |input, cx| input.set_read_only(read_only, cx));
         }
     }
 
-    pub(super) fn refresh_note_block_rich_input(
+    /// Re-aligns the block input mode and placeholder with the block kind
+    /// after a conversion. The Markdown source stays the block body.
+    pub(super) fn refresh_note_block_input(
         &mut self,
         index: usize,
-        window: &mut Window,
         cx: &mut Context<IdeallDesktop>,
     ) {
         let Some(block) = self.note_blocks.get(index) else {
             return;
         };
-        let id = block.id;
-        let placeholder = block.kind.placeholder();
-        let markdown = block
-            .rich_input
-            .as_ref()
-            .map(|input| input.read(cx).markdown())
-            .unwrap_or_else(|| block.input.read(cx).value().to_string());
-        let supports_rich = block.kind.supports_inline_rich_text();
-        block.input.update(cx, |input, cx| {
-            input.set_value(markdown.clone(), window, cx);
-            input.set_placeholder(placeholder, window, cx);
-        });
-        if supports_rich {
-            if let Some(input) = &block.rich_input {
-                input.update(cx, |input, cx| input.set_markdown(&markdown, cx));
-                return;
-            }
-            let rich_input = cx.new(|cx| RichInputState::new(&markdown, placeholder, cx));
-            let subscription = cx.subscribe_in(
-                &rich_input,
-                window,
-                move |this, _, event: &RichInputEvent, window, cx| {
-                    this.handle_note_rich_input(id, event, window, cx);
-                },
-            );
-            self.note_block_subscriptions.push(subscription);
-            self.note_blocks[index].rich_input = Some(rich_input);
+        let placeholder = note_block_placeholder(&block.kind);
+        let mode = if block.kind.supports_inline_rich_text() {
+            RichInputMode::Rich
         } else {
-            self.note_blocks[index].rich_input = None;
-        }
+            RichInputMode::Plain
+        };
+        block.input.update(cx, |input, cx| {
+            input.set_placeholder(placeholder, cx);
+            input.set_mode(mode, cx);
+        });
     }
 }
 
@@ -850,6 +859,46 @@ pub(super) fn utf16_offset_for_byte(text: &str, byte_offset: usize) -> usize {
         byte_offset -= 1;
     }
     text[..byte_offset].encode_utf16().count()
+}
+
+impl EditorWorkspace {
+    pub(crate) fn active_tab_id(&self) -> Option<String> {
+        self.workspace.active_id.clone()
+    }
+
+    pub(crate) fn activate_tab(&mut self, id: &str) -> Option<String> {
+        self.workspace.activate(id).then(|| {
+            self.workspace
+                .tabs
+                .iter()
+                .find(|tab| tab_key(tab) == id)
+                .map(|tab| tab.file.file_id.clone())
+        })?
+    }
+
+    pub(crate) fn activate_next_tab(&mut self) -> Option<String> {
+        self.workspace.activate_next().then(|| {
+            self.workspace.active_id.as_deref().and_then(|active_id| {
+                self.workspace
+                    .tabs
+                    .iter()
+                    .find(|tab| tab_key(tab) == active_id)
+                    .map(|tab| tab.file.file_id.clone())
+            })
+        })?
+    }
+
+    pub(crate) fn activate_previous_tab(&mut self) -> Option<String> {
+        self.workspace.activate_previous().then(|| {
+            self.workspace.active_id.as_deref().and_then(|active_id| {
+                self.workspace
+                    .tabs
+                    .iter()
+                    .find(|tab| tab_key(tab) == active_id)
+                    .map(|tab| tab.file.file_id.clone())
+            })
+        })?
+    }
 }
 
 #[cfg(test)]

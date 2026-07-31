@@ -5,6 +5,8 @@
 
 use std::ops::Range;
 
+use crate::note_document::note_block_ranges;
+
 const PROTECTED_PREFIX: &str = "⟦ideall:受保护块:";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -214,7 +216,7 @@ pub fn move_note_block(
     direction: NoteBlockMove,
 ) -> Option<bool> {
     *cursor = clip_char_boundary(target, *cursor);
-    let ranges = block_ranges(target)?;
+    let ranges = note_block_ranges(target)?;
     let current = current_block(&ranges, *cursor)?;
     let destination = match direction {
         NoteBlockMove::Up => current.checked_sub(1),
@@ -245,7 +247,7 @@ pub fn duplicate_note_block(
     cursor: &mut usize,
 ) -> Result<bool, NoteEditError> {
     *cursor = clip_char_boundary(target, *cursor);
-    let ranges = block_ranges(target).ok_or(NoteEditError::UnclosedCodeFence)?;
+    let ranges = note_block_ranges(target).ok_or(NoteEditError::UnclosedCodeFence)?;
     let current = current_block(&ranges, *cursor).ok_or(NoteEditError::UnclosedCodeFence)?;
     let range = ranges[current].clone();
     let block = target[range.clone()].to_owned();
@@ -264,7 +266,7 @@ pub fn duplicate_note_block(
 
 pub fn delete_note_block(target: &mut String, cursor: &mut usize) -> Result<bool, NoteEditError> {
     *cursor = clip_char_boundary(target, *cursor);
-    let ranges = block_ranges(target).ok_or(NoteEditError::UnclosedCodeFence)?;
+    let ranges = note_block_ranges(target).ok_or(NoteEditError::UnclosedCodeFence)?;
     let current = current_block(&ranges, *cursor).ok_or(NoteEditError::UnclosedCodeFence)?;
     let range = ranges[current].clone();
     ensure_mutable_block(&target[range.clone()])?;
@@ -446,80 +448,6 @@ pub fn toggle_note_inline_style(
         *selection = start + prefix.len()..start + prefix.len() + content.len();
     }
     Ok(true)
-}
-
-fn block_ranges(target: &str) -> Option<Vec<Range<usize>>> {
-    let mut lines = Vec::new();
-    let mut offset = 0;
-    for line in target.split('\n') {
-        lines.push((offset, offset + line.len(), line));
-        offset += line.len() + 1;
-    }
-
-    let mut ranges = Vec::new();
-    let mut index = 0;
-    while index < lines.len() {
-        let (start, mut end, line) = lines[index];
-        if line.starts_with("```") {
-            index += 1;
-            let mut closed = false;
-            while index < lines.len() {
-                end = lines[index].1;
-                if lines[index].2 == "```" {
-                    index += 1;
-                    closed = true;
-                    break;
-                }
-                index += 1;
-            }
-            if !closed {
-                return None;
-            }
-        } else if line.starts_with(":::callout ")
-            || line.starts_with(":::toggle ")
-            || line == ":::bookmark"
-        {
-            index += 1;
-            let mut closed = false;
-            while index < lines.len() {
-                end = lines[index].1;
-                if lines[index].2 == ":::" {
-                    index += 1;
-                    closed = true;
-                    break;
-                }
-                index += 1;
-            }
-            if !closed {
-                return None;
-            }
-        } else if line == "$$" {
-            index += 1;
-            let mut closed = false;
-            while index < lines.len() {
-                end = lines[index].1;
-                if lines[index].2 == "$$" {
-                    index += 1;
-                    closed = true;
-                    break;
-                }
-                index += 1;
-            }
-            if !closed {
-                return None;
-            }
-        } else if line.starts_with("> ") {
-            index += 1;
-            while index < lines.len() && lines[index].2.starts_with("> ") {
-                end = lines[index].1;
-                index += 1;
-            }
-        } else {
-            index += 1;
-        }
-        ranges.push(start..end);
-    }
-    Some(ranges)
 }
 
 fn current_block(ranges: &[Range<usize>], cursor: usize) -> Option<usize> {

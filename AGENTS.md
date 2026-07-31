@@ -15,8 +15,8 @@ agent、acp、secrets、updater 是适配层。Rust 测试位于各 crate 的 `s
 
 ## 构建、测试与开发命令
 
-- `pnpm app:dev` 或 `pnpm dev`：启动 GPUI 桌面 App。
-- `pnpm app:build` 或 `pnpm build`：构建并打包当前桌面平台的 GPUI App。
+- `pnpm app:dev`：启动 GPUI 桌面 App。
+- `pnpm app:build`：构建并打包当前桌面平台的 GPUI App。
 - `pnpm native:check`、`pnpm native:test`、`pnpm native:lint`：分别运行原生 workspace
   检查、测试和 rustfmt/clippy 门禁。
 - `pnpm test:scripts`：运行维护与发布脚本测试。

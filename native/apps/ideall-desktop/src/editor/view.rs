@@ -23,23 +23,23 @@ fn note_color_label(color: NoteColor) -> &'static str {
     }
 }
 
-fn note_block_style(kind: &NoteEditorBlockKind) -> Option<NoteBlockStyle> {
+fn note_block_style(kind: &NoteBlockKind) -> Option<NoteBlockStyle> {
     match kind {
-        NoteEditorBlockKind::Paragraph => Some(NoteBlockStyle::Paragraph),
-        NoteEditorBlockKind::Heading(1) => Some(NoteBlockStyle::Heading1),
-        NoteEditorBlockKind::Heading(2) => Some(NoteBlockStyle::Heading2),
-        NoteEditorBlockKind::Heading(_) => Some(NoteBlockStyle::Heading3),
-        NoteEditorBlockKind::Quote => Some(NoteBlockStyle::Quote),
-        NoteEditorBlockKind::Bullet => Some(NoteBlockStyle::Bullet),
-        NoteEditorBlockKind::Ordered => Some(NoteBlockStyle::Ordered),
-        NoteEditorBlockKind::Todo => Some(NoteBlockStyle::Todo),
-        NoteEditorBlockKind::Code { .. } => Some(NoteBlockStyle::Code),
-        NoteEditorBlockKind::Rule => Some(NoteBlockStyle::Rule),
-        NoteEditorBlockKind::Callout { .. } => Some(NoteBlockStyle::Callout),
-        NoteEditorBlockKind::Toggle { .. } => Some(NoteBlockStyle::Toggle),
-        NoteEditorBlockKind::Equation => Some(NoteBlockStyle::Equation),
-        NoteEditorBlockKind::Bookmark => Some(NoteBlockStyle::Bookmark),
-        NoteEditorBlockKind::Protected => None,
+        NoteBlockKind::Paragraph => Some(NoteBlockStyle::Paragraph),
+        NoteBlockKind::Heading(1) => Some(NoteBlockStyle::Heading1),
+        NoteBlockKind::Heading(2) => Some(NoteBlockStyle::Heading2),
+        NoteBlockKind::Heading(_) => Some(NoteBlockStyle::Heading3),
+        NoteBlockKind::Quote => Some(NoteBlockStyle::Quote),
+        NoteBlockKind::Bullet => Some(NoteBlockStyle::Bullet),
+        NoteBlockKind::Ordered => Some(NoteBlockStyle::Ordered),
+        NoteBlockKind::Todo => Some(NoteBlockStyle::Todo),
+        NoteBlockKind::Code { .. } => Some(NoteBlockStyle::Code),
+        NoteBlockKind::Rule => Some(NoteBlockStyle::Rule),
+        NoteBlockKind::Callout { .. } => Some(NoteBlockStyle::Callout),
+        NoteBlockKind::Toggle { .. } => Some(NoteBlockStyle::Toggle),
+        NoteBlockKind::Equation => Some(NoteBlockStyle::Equation),
+        NoteBlockKind::Bookmark => Some(NoteBlockStyle::Bookmark),
+        NoteBlockKind::Protected => None,
     }
 }
 
@@ -79,6 +79,8 @@ fn note_block_style_dropdown(
         .label(label)
         .tooltip("转换当前内容块")
         .small()
+        .h(px(28.0))
+        .rounded_full()
         .ghost()
         .disabled(selected_count > 1 || current.is_none())
         .dropdown_caret(true)
@@ -132,8 +134,13 @@ fn note_color_dropdown(
             "背景高亮"
         })
         .xsmall()
+        .h(px(28.0))
+        .rounded(px(6.0))
         .ghost()
         .selected(selected.is_some())
+        .when(selected.is_some(), |button| {
+            button.bg(rgb(ACCENT_SOFT)).text_color(rgb(ACCENT))
+        })
         .disabled(disabled)
         .dropdown_caret(true)
         .dropdown_menu(move |menu, _, _| {
@@ -335,7 +342,6 @@ impl IdeallDesktop {
                         |(index, block)| {
                             let id = block.id;
                             let input = block.input.clone();
-                            let rich_input = block.rich_input.clone();
                             let kind = block.kind.clone();
                             let is_active = index == self.editor.active_note_block;
                             let is_selected = self.editor.selected_note_blocks.contains(&id);
@@ -346,71 +352,66 @@ impl IdeallDesktop {
                             };
                             let indent = block.indent;
                             let checked = block.checked;
-                            let value = input.read(cx).value().to_string();
-                            let is_rule = kind == NoteEditorBlockKind::Rule;
-                            let is_protected = kind == NoteEditorBlockKind::Protected;
-                            let is_todo = kind == NoteEditorBlockKind::Todo;
-                            let is_code = matches!(kind, NoteEditorBlockKind::Code { .. });
+                            let value = input.read(cx).text().to_owned();
+                            let is_rule = kind == NoteBlockKind::Rule;
+                            let is_protected = kind == NoteBlockKind::Protected;
+                            let is_todo = kind == NoteBlockKind::Todo;
+                            let is_code = matches!(kind, NoteBlockKind::Code { .. });
                             let is_callout =
-                                matches!(kind, NoteEditorBlockKind::Callout { .. });
-                            let is_toggle = matches!(kind, NoteEditorBlockKind::Toggle { .. });
-                            let is_equation = kind == NoteEditorBlockKind::Equation;
-                            let is_bookmark = kind == NoteEditorBlockKind::Bookmark;
+                                matches!(kind, NoteBlockKind::Callout { .. });
+                            let is_toggle = matches!(kind, NoteBlockKind::Toggle { .. });
+                            let is_equation = kind == NoteBlockKind::Equation;
+                            let is_bookmark = kind == NoteBlockKind::Bookmark;
                             let toggle_expanded = match &kind {
-                                NoteEditorBlockKind::Toggle { expanded } => *expanded,
+                                NoteBlockKind::Toggle { expanded } => *expanded,
                                 _ => true,
                             };
                             let callout_icon = match &kind {
-                                NoteEditorBlockKind::Callout { icon } => Some(icon.clone()),
+                                NoteBlockKind::Callout { icon } => Some(icon.clone()),
                                 _ => None,
                             };
                             let prefix = match &kind {
-                                NoteEditorBlockKind::Bullet => Some("•".to_owned()),
-                                NoteEditorBlockKind::Ordered => Some(format!("{}.", index + 1)),
+                                NoteBlockKind::Bullet => Some("•".to_owned()),
+                                NoteBlockKind::Ordered => Some(format!("{}.", index + 1)),
                                 _ => None,
                             };
                             let show_input = interactive
                                 && (!is_toggle || toggle_expanded)
                                 && !is_rule
                                 && !is_protected;
-                            let show_rich_input = show_input && rich_input.is_some() && !is_bookmark;
-                            let show_selection_toolbar = show_rich_input
+                            let show_block_input = show_input && !is_bookmark;
+                            let inline_rich_text = kind.supports_inline_rich_text();
+                            let show_selection_toolbar = show_block_input
+                                && inline_rich_text
                                 && is_active
                                 && self.editor.link_editor.is_none()
-                                && rich_input
-                                    .as_ref()
-                                    .is_some_and(|input| input.read(cx).has_selection());
-                            let selection_bold = rich_input.as_ref().is_some_and(|input| {
-                                input
+                                && input.read(cx).has_selection();
+                            let selection_bold = inline_rich_text
+                                && input
                                     .read(cx)
-                                    .selection_has_style(NoteInlineStyle::Bold)
-                            });
-                            let selection_italic = rich_input.as_ref().is_some_and(|input| {
-                                input
+                                    .selection_has_style(NoteInlineStyle::Bold);
+                            let selection_italic = inline_rich_text
+                                && input
                                     .read(cx)
-                                    .selection_has_style(NoteInlineStyle::Italic)
-                            });
-                            let selection_strike = rich_input.as_ref().is_some_and(|input| {
-                                input
+                                    .selection_has_style(NoteInlineStyle::Italic);
+                            let selection_strike = inline_rich_text
+                                && input
                                     .read(cx)
-                                    .selection_has_style(NoteInlineStyle::Strikethrough)
-                            });
-                            let selection_code = rich_input.as_ref().is_some_and(|input| {
-                                input
+                                    .selection_has_style(NoteInlineStyle::Strikethrough);
+                            let selection_code = inline_rich_text
+                                && input
                                     .read(cx)
-                                    .selection_has_style(NoteInlineStyle::Code)
-                            });
-                            let selection_link = rich_input.as_ref().is_some_and(|input| {
-                                input
+                                    .selection_has_style(NoteInlineStyle::Code);
+                            let selection_link = inline_rich_text
+                                && input
                                     .read(cx)
-                                    .selection_has_style(NoteInlineStyle::Link)
-                            });
-                            let selection_text_color = rich_input
-                                .as_ref()
-                                .and_then(|input| input.read(cx).selection_color(true));
-                            let selection_highlight = rich_input
-                                .as_ref()
-                                .and_then(|input| input.read(cx).selection_color(false));
+                                    .selection_has_style(NoteInlineStyle::Link);
+                            let selection_text_color = inline_rich_text
+                                .then(|| input.read(cx).selection_color(true))
+                                .flatten();
+                            let selection_highlight = inline_rich_text
+                                .then(|| input.read(cx).selection_color(false))
+                                .flatten();
                             let rich_source = if is_equation {
                                 value.clone()
                             } else if is_toggle && !toggle_expanded {
@@ -418,19 +419,18 @@ impl IdeallDesktop {
                             } else {
                                 value.clone()
                             };
-                            let rich_text = rich_input.clone().map_or_else(
-                                || {
-                                    TextView::markdown(
-                                        SharedString::from(format!("note-block-rich-{id}")),
-                                        rich_source,
-                                        window,
-                                        cx,
-                                    )
-                                    .selectable(!interactive)
-                                    .into_any_element()
-                                },
-                                |input| input.into_any_element(),
-                            );
+                            let rich_text = if inline_rich_text {
+                                input.clone().into_any_element()
+                            } else {
+                                TextView::markdown(
+                                    SharedString::from(format!("note-block-rich-{id}")),
+                                    rich_source,
+                                    window,
+                                    cx,
+                                )
+                                .selectable(!interactive)
+                                .into_any_element()
+                            };
 
                             div()
                                 .id(SharedString::from(format!("note-block-row-{id}")))
@@ -601,23 +601,13 @@ impl IdeallDesktop {
                                         .flex()
                                         .items_start()
                                         .when(
-                                            matches!(kind, NoteEditorBlockKind::Quote),
-                                            |content| {
-                                                content
-                                                    .border_l_1()
-                                                    .border_color(rgb(INK_MUTED))
-                                                    .pl_3()
-                                            },
-                                        )
-                                        .when(
                                             is_code,
                                             |content| {
                                                 content
-                                                    .p_2()
+                                                    .p_3()
                                                     .rounded_md()
-                                                    .border_1()
-                                                    .border_color(rgb(BORDER))
                                                     .bg(rgb(SURFACE_MUTED))
+                                                    .font_family("monospace")
                                             },
                                         )
                                         .when(is_callout, |content| {
@@ -767,29 +757,35 @@ impl IdeallDesktop {
                                             )
                                         })
                                         .when(is_bookmark && show_input, |content| {
-                                            content.child(
-                                                Input::new(&input)
-                                                    .w_full()
-                                                    .min_h(px(34.0))
-                                                    .text_size(px(15.0))
-                                                    .appearance(false)
-                                                    .bordered(false)
-                                                    .focus_bordered(false),
-                                            )
-                                            .child(
-                                                Button::new(SharedString::from(format!(
-                                                    "note-bookmark-open-{id}"
-                                                )))
-                                                .label("打开")
-                                                .tooltip("在系统浏览器中打开")
-                                                .xsmall()
-                                                .ghost()
-                                                .on_click(cx.listener(move |this, _, _, cx| {
-                                                    this.open_note_bookmark(id, cx);
-                                                })),
-                                            )
+                                            content
+                                                .child(
+                                                    div()
+                                                        .w_full()
+                                                        .min_h(px(34.0))
+                                                        .py_1()
+                                                        .text_size(px(15.0))
+                                                        .child(input.clone()),
+                                                )
+                                                .child(
+                                                    Button::new(SharedString::from(format!(
+                                                        "note-bookmark-open-{id}"
+                                                    )))
+                                                    .label("打开")
+                                                    .tooltip("在系统浏览器中打开")
+                                                    .xsmall()
+                                                    .ghost()
+                                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                                        this.open_note_bookmark(id, cx);
+                                                    })),
+                                                )
                                         })
                                         .when(is_bookmark && !show_input, |content| {
+                                            let host = url::Url::parse(&value)
+                                                .ok()
+                                                .and_then(|parsed| {
+                                                    parsed.host_str().map(str::to_owned)
+                                                })
+                                                .unwrap_or_else(|| "网页书签".into());
                                             content
                                                 .child(
                                                     div()
@@ -801,7 +797,10 @@ impl IdeallDesktop {
                                                         .rounded_md()
                                                         .bg(rgb(ACCENT_SOFT))
                                                         .text_color(rgb(ACCENT))
-                                                        .child("↗"),
+                                                        .child(
+                                                            Icon::new(IconName::Globe)
+                                                                .size(px(15.0)),
+                                                        ),
                                                 )
                                                 .child(
                                                     div()
@@ -812,12 +811,15 @@ impl IdeallDesktop {
                                                         .gap(px(2.0))
                                                         .child(
                                                             div()
+                                                                .overflow_hidden()
+                                                                .text_ellipsis()
+                                                                .whitespace_nowrap()
                                                                 .text_sm()
                                                                 .font_weight(
                                                                     gpui::FontWeight::SEMIBOLD,
                                                                 )
                                                                 .text_color(rgb(INK))
-                                                                .child("网页书签"),
+                                                                .child(host),
                                                         )
                                                         .child(
                                                             div()
@@ -833,7 +835,8 @@ impl IdeallDesktop {
                                                     Button::new(SharedString::from(format!(
                                                         "note-bookmark-open-card-{id}"
                                                     )))
-                                                    .label("打开")
+                                                    .icon(IconName::ExternalLink)
+                                                    .tooltip("在系统浏览器中打开")
                                                     .xsmall()
                                                     .ghost()
                                                     .on_click(cx.listener(
@@ -951,111 +954,55 @@ impl IdeallDesktop {
                                                     )),
                                             )
                                         })
-                                        .when(
-                                            show_rich_input,
-                                            |content| {
-                                                let rich_input = rich_input
-                                                    .clone()
-                                                    .expect("rich input was checked above");
-                                                content.child(
-                                                    div()
-                                                        .w_full()
-                                                        .min_h(px(34.0))
-                                                        .py_1()
-                                                        .text_size(match kind {
-                                                            NoteEditorBlockKind::Heading(1) => {
-                                                                px(28.0)
-                                                            }
-                                                            NoteEditorBlockKind::Heading(2) => {
-                                                                px(23.0)
-                                                            }
-                                                            NoteEditorBlockKind::Heading(3) => {
-                                                                px(19.0)
-                                                            }
-                                                            NoteEditorBlockKind::Heading(_) => {
-                                                                px(17.0)
-                                                            }
-                                                            _ => px(16.0),
-                                                        })
-                                                        .line_height(match kind {
-                                                            NoteEditorBlockKind::Heading(1) => {
-                                                                px(38.0)
-                                                            }
-                                                            NoteEditorBlockKind::Heading(2) => {
-                                                                px(34.0)
-                                                            }
-                                                            NoteEditorBlockKind::Heading(3) => {
-                                                                px(30.0)
-                                                            }
-                                                            _ => px(26.0),
-                                                        })
-                                                        .font_weight(
-                                                            if matches!(
-                                                                kind,
-                                                                NoteEditorBlockKind::Heading(_)
-                                                            ) {
-                                                                gpui::FontWeight::SEMIBOLD
-                                                            } else {
-                                                                gpui::FontWeight::NORMAL
-                                                            },
-                                                        )
-                                                        .child(rich_input),
-                                                )
-                                            },
-                                        )
-                                        .when(
-                                            show_input && !is_bookmark && !show_rich_input,
-                                            |content| {
-                                                content.child(
-                                                    Input::new(&input)
-                                                        .w_full()
-                                                        .min_h(px(34.0))
-                                                        .text_size(match kind {
-                                                            NoteEditorBlockKind::Heading(1) => {
-                                                                px(28.0)
-                                                            }
-                                                            NoteEditorBlockKind::Heading(2) => {
-                                                                px(23.0)
-                                                            }
-                                                            NoteEditorBlockKind::Heading(3) => {
-                                                                px(19.0)
-                                                            }
-                                                            NoteEditorBlockKind::Heading(_) => {
-                                                                px(17.0)
-                                                            }
-                                                            NoteEditorBlockKind::Code { .. } => {
-                                                                px(14.0)
-                                                            }
-                                                            _ => px(16.0),
-                                                        })
-                                                        .line_height(match kind {
-                                                            NoteEditorBlockKind::Heading(1) => {
-                                                                px(38.0)
-                                                            }
-                                                            NoteEditorBlockKind::Heading(2) => {
-                                                                px(34.0)
-                                                            }
-                                                            NoteEditorBlockKind::Heading(3) => {
-                                                                px(30.0)
-                                                            }
-                                                            _ => px(26.0),
-                                                        })
-                                                        .font_weight(
-                                                            if matches!(
-                                                                kind,
-                                                                NoteEditorBlockKind::Heading(_)
-                                                            ) {
-                                                                gpui::FontWeight::SEMIBOLD
-                                                            } else {
-                                                                gpui::FontWeight::NORMAL
-                                                            },
-                                                        )
-                                                        .appearance(false)
-                                                        .bordered(false)
-                                                        .focus_bordered(false),
-                                                )
-                                            },
-                                        )
+                                        .when(show_block_input, |content| {
+                                            content.child(
+                                                div()
+                                                    .w_full()
+                                                    .min_h(px(34.0))
+                                                    .py_1()
+                                                    .text_size(match kind {
+                                                        NoteBlockKind::Heading(1) => {
+                                                            px(28.0)
+                                                        }
+                                                        NoteBlockKind::Heading(2) => {
+                                                            px(23.0)
+                                                        }
+                                                        NoteBlockKind::Heading(3) => {
+                                                            px(19.0)
+                                                        }
+                                                        NoteBlockKind::Heading(_) => {
+                                                            px(17.0)
+                                                        }
+                                                        NoteBlockKind::Code { .. } => {
+                                                            px(14.0)
+                                                        }
+                                                        _ => px(16.0),
+                                                    })
+                                                    .line_height(match kind {
+                                                        NoteBlockKind::Heading(1) => {
+                                                            px(38.0)
+                                                        }
+                                                        NoteBlockKind::Heading(2) => {
+                                                            px(34.0)
+                                                        }
+                                                        NoteBlockKind::Heading(3) => {
+                                                            px(30.0)
+                                                        }
+                                                        _ => px(26.0),
+                                                    })
+                                                    .font_weight(
+                                                        if matches!(
+                                                            kind,
+                                                            NoteBlockKind::Heading(_)
+                                                        ) {
+                                                            gpui::FontWeight::SEMIBOLD
+                                                        } else {
+                                                            gpui::FontWeight::NORMAL
+                                                        },
+                                                    )
+                                                    .child(input.clone()),
+                                            )
+                                        })
                                         .when(
                                             !show_input
                                                 && !is_rule
@@ -1069,22 +1016,22 @@ impl IdeallDesktop {
                                                         .min_h(px(34.0))
                                                         .py_1()
                                                         .text_size(match kind {
-                                                        NoteEditorBlockKind::Heading(1) => px(28.0),
-                                                        NoteEditorBlockKind::Heading(2) => px(23.0),
-                                                        NoteEditorBlockKind::Heading(3) => px(19.0),
-                                                        NoteEditorBlockKind::Heading(_) => px(17.0),
+                                                        NoteBlockKind::Heading(1) => px(28.0),
+                                                        NoteBlockKind::Heading(2) => px(23.0),
+                                                        NoteBlockKind::Heading(3) => px(19.0),
+                                                        NoteBlockKind::Heading(_) => px(17.0),
                                                         _ => px(16.0),
                                                         })
                                                         .line_height(match kind {
-                                                            NoteEditorBlockKind::Heading(1) => px(38.0),
-                                                            NoteEditorBlockKind::Heading(2) => px(34.0),
-                                                            NoteEditorBlockKind::Heading(3) => px(30.0),
+                                                            NoteBlockKind::Heading(1) => px(38.0),
+                                                            NoteBlockKind::Heading(2) => px(34.0),
+                                                            NoteBlockKind::Heading(3) => px(30.0),
                                                             _ => px(26.0),
                                                         })
                                                         .font_weight(
                                                             if matches!(
                                                                 kind,
-                                                                NoteEditorBlockKind::Heading(_)
+                                                                NoteBlockKind::Heading(_)
                                                             ) {
                                                                 gpui::FontWeight::SEMIBOLD
                                                             } else {
@@ -1097,15 +1044,13 @@ impl IdeallDesktop {
                                         )
                                         .when(!show_input && is_code, |content| {
                                             content.child(
-                                                Input::new(&input)
+                                                div()
                                                     .w_full()
                                                     .min_h(px(34.0))
+                                                    .py_1()
                                                     .text_size(px(14.0))
                                                     .line_height(px(24.0))
-                                                    .appearance(false)
-                                                    .bordered(false)
-                                                    .focus_bordered(false)
-                                                    .disabled(true),
+                                                    .child(input.clone()),
                                             )
                                         }),
                                 )
@@ -1204,12 +1149,10 @@ impl IdeallDesktop {
         let list_like = active_block.is_some_and(|block| {
             matches!(
                 block.kind,
-                NoteEditorBlockKind::Bullet
-                    | NoteEditorBlockKind::Ordered
-                    | NoteEditorBlockKind::Todo
+                NoteBlockKind::Bullet | NoteBlockKind::Ordered | NoteBlockKind::Todo
             )
         });
-        let is_todo = active_block.is_some_and(|block| block.kind == NoteEditorBlockKind::Todo);
+        let is_todo = active_block.is_some_and(|block| block.kind == NoteBlockKind::Todo);
         let active_rich_input = self.editor.active_rich_input();
         let active_text_color = self
             .editor
@@ -1277,15 +1220,22 @@ impl IdeallDesktop {
                             Button::new(id)
                                 .label(label)
                                 .tooltip(tooltip)
-                                .xsmall()
+                                .w(px(28.0))
+                                .h(px(28.0))
+                                .p_0()
+                                .rounded(px(6.0))
                                 .ghost()
                                 .selected(selected)
+                                .when(selected, |button| {
+                                    button.bg(rgb(ACCENT_SOFT)).text_color(rgb(ACCENT))
+                                })
                                 .disabled(multiple_selected)
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.format_note_inline(style, window, cx);
                                 }))
                         }),
                     )
+                    .child(div().w(px(1.0)).h(px(20.0)).mx_1().bg(rgb(BORDER)))
                     .child(note_color_dropdown(
                         "note-inline-text-color",
                         true,
@@ -1306,7 +1256,10 @@ impl IdeallDesktop {
                             Button::new("note-todo-toggle")
                                 .label("✓")
                                 .tooltip("切换待办完成状态")
-                                .xsmall()
+                                .w(px(28.0))
+                                .h(px(28.0))
+                                .p_0()
+                                .rounded(px(6.0))
                                 .ghost()
                                 .disabled(multiple_selected)
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -1320,7 +1273,10 @@ impl IdeallDesktop {
                                 Button::new("note-indent-out")
                                     .label("←")
                                     .tooltip("减少列表层级")
-                                    .xsmall()
+                                    .w(px(28.0))
+                                    .h(px(28.0))
+                                    .p_0()
+                                    .rounded(px(6.0))
                                     .ghost()
                                     .disabled(multiple_selected)
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -1335,7 +1291,10 @@ impl IdeallDesktop {
                                 Button::new("note-indent-in")
                                     .label("→")
                                     .tooltip("增加列表层级")
-                                    .xsmall()
+                                    .w(px(28.0))
+                                    .h(px(28.0))
+                                    .p_0()
+                                    .rounded(px(6.0))
                                     .ghost()
                                     .disabled(multiple_selected)
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -1347,11 +1306,15 @@ impl IdeallDesktop {
                                     })),
                             )
                     })
+                    .child(div().w(px(1.0)).h(px(20.0)).mx_1().bg(rgb(BORDER)))
                     .child(
                         Button::new("note-block-more")
                             .label("•••")
                             .tooltip("更多块操作")
-                            .xsmall()
+                            .w(px(28.0))
+                            .h(px(28.0))
+                            .p_0()
+                            .rounded(px(6.0))
                             .ghost()
                             .dropdown_menu(|menu, _, _| {
                                 menu.label("块操作")

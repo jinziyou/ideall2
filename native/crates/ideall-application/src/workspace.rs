@@ -29,6 +29,7 @@ use crate::note_document::{NoteDocumentError, apply_note_text, project_note};
 use crate::note_rich_text::note_node_id_from_url;
 
 pub const HOME_ROOT_ID: &str = "ideall-home";
+pub const INBOX_ROOT_ID: &str = "ideall-inbox";
 const ENGINE_PREFERENCES_KEY: &str = "engine-preferences:files";
 const SYNC_SETTINGS_KEY: &str = "sync-settings:v1";
 const AGENT_MODEL_SETTINGS_KEY: &str = "agent-model-settings:v1";
@@ -112,6 +113,8 @@ pub struct NodeSummary {
     pub updated_at: i64,
     pub deleted: bool,
     pub depth: usize,
+    /// 全文搜索命中摘要（含 «» 高亮标记）；非搜索列表为空串。
+    pub snippet: String,
 }
 
 impl From<&Node> for NodeSummary {
@@ -124,6 +127,7 @@ impl From<&Node> for NodeSummary {
             updated_at: node.base().updated_at,
             deleted: node.base().deleted_at.is_some(),
             depth: 0,
+            snippet: String::new(),
         }
     }
 }
@@ -138,8 +142,17 @@ impl From<&NodeProjection> for NodeSummary {
             updated_at: node.updated_at,
             deleted: node.deleted,
             depth: 0,
+            snippet: String::new(),
         }
     }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct BookmarkMetadata {
+    pub canonical_url: Option<String>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub favicon: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -272,11 +285,24 @@ impl LocalWorkspace {
     }
 
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<NodeSummary>, ApplicationError> {
+        self.search_with_kind(query, limit, None)
+    }
+
+    pub fn search_with_kind(
+        &self,
+        query: &str,
+        limit: usize,
+        kind: Option<NodeKind>,
+    ) -> Result<Vec<NodeSummary>, ApplicationError> {
         Ok(self
             .database
-            .search_nodes(query, limit)?
-            .iter()
-            .map(NodeSummary::from)
+            .search_nodes(query, limit, kind)?
+            .into_iter()
+            .map(|hit| {
+                let mut summary = NodeSummary::from(&hit.node);
+                summary.snippet = hit.snippet;
+                summary
+            })
             .collect())
     }
 
@@ -485,6 +511,100 @@ impl LocalWorkspace {
                 search_domain: None,
             },
         };
+        self.database.put_node(&node)?;
+        Ok(node)
+    }
+
+    /// 惰性创建固定 id 的「收集箱」目录；已存在时直接复用，
+    /// 被移到回收站时恢复原节点而不是新建。
+    pub fn ensure_inbox(&mut self) -> Result<String, ApplicationError> {
+        match self.database.get_node(INBOX_ROOT_ID)? {
+            Some(mut node @ Node::Folder { .. }) => {
+                if node.base().deleted_at.is_some() {
+                    let timestamp = now_millis()?;
+                    if !self.database.restore_from_trash(INBOX_ROOT_ID, timestamp)? {
+                        node.base_mut().deleted_at = None;
+                        node.base_mut().updated_at = timestamp;
+                        self.database.put_node(&node)?;
+                    }
+                }
+                Ok(INBOX_ROOT_ID.into())
+            }
+            Some(node) => Err(ApplicationError::WrongKind {
+                id: INBOX_ROOT_ID.into(),
+                actual: node.kind(),
+                expected: NodeKind::Folder,
+            }),
+            None => {
+                let timestamp = now_millis()?;
+                self.database.put_node(&Node::Folder {
+                    base: BaseNode {
+                        id: INBOX_ROOT_ID.into(),
+                        parent_id: Some(HOME_ROOT_ID.into()),
+                        // 排在使用时间戳 sort_key 的普通目录之后。
+                        sort_key: format!("99999999999999999999-{INBOX_ROOT_ID}"),
+                        title: "收集箱".into(),
+                        tags: Vec::new(),
+                        created_at: timestamp,
+                        updated_at: timestamp,
+                        deleted_at: None,
+                        meta: BTreeMap::new(),
+                    },
+                    content: None,
+                })?;
+                Ok(INBOX_ROOT_ID.into())
+            }
+        }
+    }
+
+    /// 一键捕获书签：校验网址后以网址为初始标题落入收集箱。
+    pub fn capture_bookmark(&mut self, url: &str) -> Result<Node, ApplicationError> {
+        validated_bookmark_url(url)?;
+        let inbox = self.ensure_inbox()?;
+        self.create_bookmark(Some(&inbox), url, url)
+    }
+
+    /// 合并抓取到的页面元数据：只覆盖未被人工编辑的字段。
+    ///
+    /// 标题保护：仅当现标题仍等于现网址或占位标题「新建书签」时才替换；
+    /// canonical 地址与现网址不同且合法时才更新 `content.url`。
+    pub fn apply_bookmark_metadata(
+        &mut self,
+        id: &str,
+        meta: &BookmarkMetadata,
+    ) -> Result<Node, ApplicationError> {
+        let mut node = self.node(id)?;
+        let Node::Bookmark { base, content } = &mut node else {
+            return Err(ApplicationError::WrongKind {
+                id: id.into(),
+                actual: node.kind(),
+                expected: NodeKind::Bookmark,
+            });
+        };
+        let title_untouched = base.title == content.url || base.title == "新建书签";
+        if title_untouched
+            && let Some(title) = meta.title.as_deref().map(str::trim)
+            && !title.is_empty()
+        {
+            base.title = title.chars().take(1024).collect();
+        }
+        if let Some(description) = meta.description.as_deref().map(str::trim)
+            && !description.is_empty()
+        {
+            content.description = description.to_owned();
+        }
+        if let Some(favicon) = meta.favicon.as_deref().map(str::trim)
+            && !favicon.is_empty()
+        {
+            content.favicon = favicon.to_owned();
+        }
+        if let Some(canonical) = meta.canonical_url.as_deref()
+            && canonical != content.url
+            && let Ok(parsed) = validated_bookmark_url(canonical)
+        {
+            content.url = parsed.into();
+        }
+        base.updated_at = now_millis()?;
         self.database.put_node(&node)?;
         Ok(node)
     }
@@ -2702,6 +2822,188 @@ mod tests {
         assert_eq!(workspace.list_trash().unwrap()[0].id, id);
         assert!(workspace.restore(&id).unwrap());
         assert_eq!(workspace.plain_note(&id).unwrap().text, "本地正文");
+    }
+
+    #[test]
+    fn inbox_is_created_lazily_reused_and_sorted_after_regular_folders() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        assert!(workspace.node(INBOX_ROOT_ID).is_err());
+
+        assert_eq!(workspace.ensure_inbox().unwrap(), INBOX_ROOT_ID);
+        let node = workspace.node(INBOX_ROOT_ID).unwrap();
+        assert_eq!(node.kind(), NodeKind::Folder);
+        assert_eq!(node.base().title, "收集箱");
+        assert_eq!(node.base().parent_id.as_deref(), Some(HOME_ROOT_ID));
+
+        // 幂等：重复调用复用同一节点。
+        assert_eq!(workspace.ensure_inbox().unwrap(), INBOX_ROOT_ID);
+
+        let folder = workspace.create_folder(None, "普通目录").unwrap();
+        let home = workspace.list_home().unwrap();
+        let ids = home.iter().map(|item| item.id.as_str()).collect::<Vec<_>>();
+        assert_eq!(ids, vec![folder.base().id.as_str(), INBOX_ROOT_ID]);
+    }
+
+    #[test]
+    fn inbox_restores_the_original_node_after_trash() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        workspace.ensure_inbox().unwrap();
+        assert!(workspace.move_to_trash(INBOX_ROOT_ID).unwrap());
+        assert!(
+            workspace
+                .node(INBOX_ROOT_ID)
+                .unwrap()
+                .base()
+                .deleted_at
+                .is_some()
+        );
+
+        assert_eq!(workspace.ensure_inbox().unwrap(), INBOX_ROOT_ID);
+        let node = workspace.node(INBOX_ROOT_ID).unwrap();
+        assert!(node.base().deleted_at.is_none());
+        assert_eq!(node.base().title, "收集箱");
+        assert!(workspace.list_trash().unwrap().is_empty());
+    }
+
+    #[test]
+    fn capture_bookmark_lands_in_inbox_with_url_as_initial_title() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        let node = workspace.capture_bookmark("https://example.com/a").unwrap();
+        assert_eq!(node.base().parent_id.as_deref(), Some(INBOX_ROOT_ID));
+        assert_eq!(node.base().title, "https://example.com/a");
+
+        let children = workspace.list_children(INBOX_ROOT_ID).unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].id, node.base().id);
+    }
+
+    #[test]
+    fn capture_bookmark_rejects_invalid_urls_before_creating_inbox() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        for url in ["", "ftp://example.com", "not a url"] {
+            assert!(matches!(
+                workspace.capture_bookmark(url),
+                Err(ApplicationError::InvalidBookmarkUrl)
+            ));
+        }
+        assert!(workspace.node(INBOX_ROOT_ID).is_err());
+    }
+
+    fn bookmark_metadata() -> BookmarkMetadata {
+        BookmarkMetadata {
+            canonical_url: Some("https://example.com/canonical".into()),
+            title: Some("抓取标题".into()),
+            description: Some("抓取摘要".into()),
+            favicon: Some("https://example.com/favicon.ico".into()),
+        }
+    }
+
+    #[test]
+    fn apply_bookmark_metadata_replaces_url_title_and_writes_fields() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        let node = workspace.capture_bookmark("https://example.com/a").unwrap();
+        let id = node.base().id.clone();
+
+        let updated = workspace
+            .apply_bookmark_metadata(&id, &bookmark_metadata())
+            .unwrap();
+        let Node::Bookmark { base, content } = &updated else {
+            panic!("capture_bookmark 创建的是书签");
+        };
+        assert_eq!(base.title, "抓取标题");
+        assert_eq!(content.url, "https://example.com/canonical");
+        assert_eq!(content.description, "抓取摘要");
+        assert_eq!(content.favicon, "https://example.com/favicon.ico");
+
+        // 占位标题「新建书签」同样视为未人工编辑。
+        let placeholder = workspace
+            .create_bookmark(None, "新建书签", "https://example.com/b")
+            .unwrap();
+        let updated = workspace
+            .apply_bookmark_metadata(&placeholder.base().id, &bookmark_metadata())
+            .unwrap();
+        assert_eq!(updated.base().title, "抓取标题");
+    }
+
+    #[test]
+    fn apply_bookmark_metadata_keeps_user_edited_title() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        let node = workspace
+            .create_bookmark(None, "我自己起的标题", "https://example.com/")
+            .unwrap();
+
+        let updated = workspace
+            .apply_bookmark_metadata(&node.base().id, &bookmark_metadata())
+            .unwrap();
+        let Node::Bookmark { base, content } = &updated else {
+            panic!("create_bookmark 创建的是书签");
+        };
+        assert_eq!(base.title, "我自己起的标题");
+        assert_eq!(content.description, "抓取摘要");
+        assert_eq!(content.favicon, "https://example.com/favicon.ico");
+    }
+
+    #[test]
+    fn apply_bookmark_metadata_ignores_invalid_canonical_urls() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        let node = workspace.capture_bookmark("https://example.com/a").unwrap();
+        let id = node.base().id.clone();
+
+        let updated = workspace
+            .apply_bookmark_metadata(
+                &id,
+                &BookmarkMetadata {
+                    canonical_url: Some("ftp://example.com/not-http".into()),
+                    ..BookmarkMetadata::default()
+                },
+            )
+            .unwrap();
+        let Node::Bookmark { content, .. } = &updated else {
+            panic!("capture_bookmark 创建的是书签");
+        };
+        assert_eq!(content.url, "https://example.com/a");
+    }
+
+    #[test]
+    fn apply_bookmark_metadata_rejects_non_bookmark_nodes() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        let note = workspace.create_note(None, "笔记").unwrap();
+        assert!(matches!(
+            workspace.apply_bookmark_metadata(&note.base().id, &bookmark_metadata()),
+            Err(ApplicationError::WrongKind { .. })
+        ));
+    }
+
+    #[test]
+    fn search_with_kind_carries_snippet_filters_kind_and_stays_openable() {
+        let mut workspace = LocalWorkspace::open_in_memory().unwrap();
+        let note = workspace.create_note(None, "流水线笔记").unwrap();
+        workspace
+            .update_plain_note(&note.base().id, "流水线作业可以提升发布效率")
+            .unwrap();
+        let bookmark = workspace
+            .create_bookmark(None, "流水线书签", "https://example.com/")
+            .unwrap();
+
+        let notes = workspace
+            .search_with_kind("流水线", 20, Some(NodeKind::Note))
+            .unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].id, note.base().id);
+        assert!(notes[0].snippet.contains("流水线"));
+
+        let bookmarks = workspace
+            .search_with_kind("流水线", 20, Some(NodeKind::Bookmark))
+            .unwrap();
+        assert_eq!(bookmarks.len(), 1);
+        assert_eq!(bookmarks[0].id, bookmark.base().id);
+
+        // 原对象跳转：搜索命中的 id 可直接打开对应节点。
+        let all = workspace.search("流水线", 20).unwrap();
+        assert_eq!(all.len(), 2);
+        for hit in &all {
+            assert_eq!(workspace.node(&hit.id).unwrap().kind(), hit.kind);
+        }
     }
 
     #[test]

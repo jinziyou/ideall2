@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Range};
 
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -26,6 +26,63 @@ pub(crate) enum NoteDocumentError {
     UnclosedCodeFence,
     #[error("高级内容块缺少结束标记")]
     UnclosedDirective,
+}
+
+/// Block kinds the native note editors can project to and from Markdown text.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum NoteBlockKind {
+    Paragraph,
+    Heading(u8),
+    Quote,
+    Bullet,
+    Ordered,
+    Todo,
+    Code { language: String },
+    Rule,
+    Callout { icon: String },
+    Toggle { expanded: bool },
+    Equation,
+    Bookmark,
+    Protected,
+}
+
+impl NoteBlockKind {
+    /// Whether the block body is edited through the inline rich text surface.
+    pub fn supports_inline_rich_text(&self) -> bool {
+        matches!(
+            self,
+            Self::Paragraph
+                | Self::Heading(_)
+                | Self::Quote
+                | Self::Bullet
+                | Self::Ordered
+                | Self::Todo
+                | Self::Callout { .. }
+        )
+    }
+}
+
+/// One editable block of the Markdown projection of a note.
+///
+/// `indent` is zero-based: each level renders as two leading spaces on list
+/// blocks. `checked` only applies to `NoteBlockKind::Todo`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NoteBlockSpec {
+    pub kind: NoteBlockKind,
+    pub text: String,
+    pub indent: usize,
+    pub checked: bool,
+}
+
+impl NoteBlockSpec {
+    pub fn paragraph(text: impl Into<String>) -> Self {
+        Self {
+            kind: NoteBlockKind::Paragraph,
+            text: text.into(),
+            indent: 0,
+            checked: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -386,58 +443,79 @@ fn protected_marker(index: usize, value: &Value) -> String {
     format!("{PROTECTED_PREFIX}{index}:{block_type}:{fingerprint}⟧")
 }
 
-fn parse_text(
-    text: &str,
-    protected: &HashMap<String, usize>,
-) -> Result<Vec<ParsedBlock>, NoteDocumentError> {
+#[derive(Clone, Debug)]
+enum ScannedKind {
+    Paragraph,
+    Heading(u8),
+    Quote,
+    Rule,
+    Code(String),
+    Bullet(usize),
+    Ordered(usize),
+    Todo { indent: usize, checked: bool },
+    Callout(String),
+    Toggle(bool),
+    Equation,
+    Bookmark,
+    ProtectedLine,
+}
+
+#[derive(Clone, Debug)]
+struct ScannedBlock {
+    rendered: String,
+    kind: ScannedKind,
+    text: String,
+}
+
+struct NoteBlockScan {
+    blocks: Vec<ScannedBlock>,
+    first_error: Option<NoteDocumentError>,
+}
+
+/// Splits the Markdown projection into editable blocks. The scan is lenient:
+/// unclosed fences and directives consume the rest of the text and are only
+/// recorded so strict callers can reject them. With `merge_hard_breaks` off,
+/// hard-break continuations stay separate blocks so byte-range callers keep
+/// one block per line outside fences and directives.
+fn scan_note_blocks(text: &str, merge_hard_breaks: bool) -> NoteBlockScan {
     let lines = text.split('\n').collect::<Vec<_>>();
-    let mut result = Vec::new();
+    let mut scan = NoteBlockScan {
+        blocks: Vec::new(),
+        first_error: None,
+    };
     let mut index = 0;
     while index < lines.len() {
         let line = lines[index];
-        if let Some(protected_index) = protected.get(line) {
-            result.push(ParsedBlock {
-                rendered: line.into(),
-                kind: None,
-                text: String::new(),
-                protected_index: Some(*protected_index),
-            });
-            index += 1;
-            continue;
-        }
         if let Some(icon) = line.strip_prefix(":::callout ") {
             let start = index;
             let icon = icon.trim();
             let icon = if icon.is_empty() { "💡" } else { icon };
-            let text = parse_directive_body(&lines, &mut index)?;
-            result.push(ParsedBlock {
+            let text = scan_directive_body(&lines, &mut index, &mut scan.first_error);
+            scan.blocks.push(ScannedBlock {
                 rendered: lines[start..index].join("\n"),
-                kind: Some(EditableKind::Callout(icon.to_owned())),
+                kind: ScannedKind::Callout(icon.to_owned()),
                 text,
-                protected_index: None,
             });
             continue;
         }
         if let Some(state) = line.strip_prefix(":::toggle ") {
             let start = index;
             let expanded = state.trim() != "closed";
-            let text = parse_directive_body(&lines, &mut index)?;
-            result.push(ParsedBlock {
+            let text = scan_directive_body(&lines, &mut index, &mut scan.first_error);
+            scan.blocks.push(ScannedBlock {
                 rendered: lines[start..index].join("\n"),
-                kind: Some(EditableKind::Toggle(expanded)),
+                kind: ScannedKind::Toggle(expanded),
                 text,
-                protected_index: None,
             });
             continue;
         }
         if line == ":::bookmark" {
             let start = index;
-            let text = parse_directive_body(&lines, &mut index)?;
-            result.push(ParsedBlock {
+            let text = scan_directive_body(&lines, &mut index, &mut scan.first_error);
+            scan.blocks.push(ScannedBlock {
                 rendered: lines[start..index].join("\n"),
-                kind: Some(EditableKind::Bookmark),
+                kind: ScannedKind::Bookmark,
                 text,
-                protected_index: None,
             });
             continue;
         }
@@ -450,19 +528,26 @@ fn parse_text(
                 index += 1;
             }
             if index == lines.len() {
-                return Err(NoteDocumentError::UnclosedDirective);
+                scan.first_error
+                    .get_or_insert(NoteDocumentError::UnclosedDirective);
+            } else {
+                index += 1;
             }
-            index += 1;
-            result.push(ParsedBlock {
+            scan.blocks.push(ScannedBlock {
                 rendered: lines[start..index].join("\n"),
-                kind: Some(EditableKind::Equation),
+                kind: ScannedKind::Equation,
                 text: equation.join("\n"),
-                protected_index: None,
             });
             continue;
         }
         if line.starts_with(PROTECTED_PREFIX) {
-            return Err(NoteDocumentError::ProtectedBlockChanged);
+            scan.blocks.push(ScannedBlock {
+                rendered: line.to_owned(),
+                kind: ScannedKind::ProtectedLine,
+                text: line.to_owned(),
+            });
+            index += 1;
+            continue;
         }
         if let Some(language) = line.strip_prefix("```") {
             let start = index;
@@ -473,14 +558,15 @@ fn parse_text(
                 index += 1;
             }
             if index == lines.len() {
-                return Err(NoteDocumentError::UnclosedCodeFence);
+                scan.first_error
+                    .get_or_insert(NoteDocumentError::UnclosedCodeFence);
+            } else {
+                index += 1;
             }
-            index += 1;
-            result.push(ParsedBlock {
+            scan.blocks.push(ScannedBlock {
                 rendered: lines[start..index].join("\n"),
-                kind: Some(EditableKind::Code(language.to_owned())),
+                kind: ScannedKind::Code(language.to_owned()),
                 text: code.join("\n"),
-                protected_index: None,
             });
             continue;
         }
@@ -494,11 +580,10 @@ fn parse_text(
                 quote.push(value);
                 index += 1;
             }
-            result.push(ParsedBlock {
+            scan.blocks.push(ScannedBlock {
                 rendered: lines[start..index].join("\n"),
-                kind: Some(EditableKind::Quote),
+                kind: ScannedKind::Quote,
                 text: quote.join("\n"),
-                protected_index: None,
             });
             continue;
         }
@@ -506,18 +591,208 @@ fn parse_text(
         let start = index;
         let mut logical_line = line.to_owned();
         index += 1;
-        while has_markdown_hard_break(&logical_line) && index < lines.len() {
+        while merge_hard_breaks && has_markdown_hard_break(&logical_line) && index < lines.len() {
             logical_line.push('\n');
             logical_line.push_str(lines[index]);
             index += 1;
         }
-        let (kind, value) = parse_line(&logical_line);
-        result.push(ParsedBlock {
+        let (kind, text) = scan_line(&logical_line);
+        scan.blocks.push(ScannedBlock {
             rendered: lines[start..index].join("\n"),
-            kind: Some(kind),
-            text: value,
+            kind,
+            text,
+        });
+    }
+    scan
+}
+
+/// Computes byte ranges for the block segmentation used by edit operations.
+/// Unlike [`parse_note_blocks`] the scan is strict: an unclosed fence or
+/// directive rejects the whole document.
+pub(crate) fn note_block_ranges(text: &str) -> Option<Vec<Range<usize>>> {
+    let scan = scan_note_blocks(text, false);
+    if scan.first_error.is_some() {
+        return None;
+    }
+    let mut ranges = Vec::with_capacity(scan.blocks.len());
+    let mut offset = 0;
+    for block in &scan.blocks {
+        let end = offset + block.rendered.len();
+        ranges.push(offset..end);
+        offset = end + 1;
+    }
+    Some(ranges)
+}
+
+fn scan_directive_body(
+    lines: &[&str],
+    index: &mut usize,
+    first_error: &mut Option<NoteDocumentError>,
+) -> String {
+    *index += 1;
+    let mut body = Vec::new();
+    while *index < lines.len() && lines[*index] != ":::" {
+        body.push(lines[*index]);
+        *index += 1;
+    }
+    if *index == lines.len() {
+        first_error.get_or_insert(NoteDocumentError::UnclosedDirective);
+    } else {
+        *index += 1;
+    }
+    body.join("\n")
+}
+
+fn scan_line(line: &str) -> (ScannedKind, String) {
+    if line == "---" {
+        return (ScannedKind::Rule, String::new());
+    }
+    let heading = line
+        .chars()
+        .take_while(|character| *character == '#')
+        .count();
+    if (1..=6).contains(&heading) && line.as_bytes().get(heading) == Some(&b' ') {
+        return (
+            ScannedKind::Heading(heading as u8),
+            line[heading + 1..].to_owned(),
+        );
+    }
+
+    let leading_spaces = line.len() - line.trim_start_matches(' ').len();
+    let indent = leading_spaces / 2;
+    let value = &line[leading_spaces..];
+    for (prefix, checked) in [("- [ ] ", false), ("- [x] ", true), ("- [X] ", true)] {
+        if let Some(text) = value.strip_prefix(prefix) {
+            return (ScannedKind::Todo { indent, checked }, text.to_owned());
+        }
+    }
+    if let Some(text) = value
+        .strip_prefix("- ")
+        .or_else(|| value.strip_prefix("* "))
+    {
+        return (ScannedKind::Bullet(indent), text.to_owned());
+    }
+    for delimiter in [". ", ") "] {
+        if let Some((number, text)) = value.split_once(delimiter)
+            && !number.is_empty()
+            && number.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return (ScannedKind::Ordered(indent), text.to_owned());
+        }
+    }
+    (ScannedKind::Paragraph, line.to_owned())
+}
+
+/// Parses the Markdown projection of a note into editable blocks.
+///
+/// The parse is lenient so editors can always show something: unclosed fences
+/// and directives consume the rest of the text. An empty document keeps one
+/// empty paragraph.
+pub fn parse_note_blocks(text: &str) -> Vec<NoteBlockSpec> {
+    let mut blocks = scan_note_blocks(text, true)
+        .blocks
+        .into_iter()
+        .map(|block| {
+            let (kind, indent, checked) = match block.kind {
+                ScannedKind::Paragraph => (NoteBlockKind::Paragraph, 0, false),
+                ScannedKind::Heading(level) => (NoteBlockKind::Heading(level), 0, false),
+                ScannedKind::Quote => (NoteBlockKind::Quote, 0, false),
+                ScannedKind::Rule => (NoteBlockKind::Rule, 0, false),
+                ScannedKind::Code(language) => (NoteBlockKind::Code { language }, 0, false),
+                ScannedKind::Bullet(indent) => (NoteBlockKind::Bullet, indent, false),
+                ScannedKind::Ordered(indent) => (NoteBlockKind::Ordered, indent, false),
+                ScannedKind::Todo { indent, checked } => (NoteBlockKind::Todo, indent, checked),
+                ScannedKind::Callout(icon) => (NoteBlockKind::Callout { icon }, 0, false),
+                ScannedKind::Toggle(expanded) => (NoteBlockKind::Toggle { expanded }, 0, false),
+                ScannedKind::Equation => (NoteBlockKind::Equation, 0, false),
+                ScannedKind::Bookmark => (NoteBlockKind::Bookmark, 0, false),
+                ScannedKind::ProtectedLine => (NoteBlockKind::Protected, 0, false),
+            };
+            NoteBlockSpec {
+                kind,
+                text: block.text,
+                indent,
+                checked,
+            }
+        })
+        .collect::<Vec<_>>();
+    if blocks.is_empty() {
+        blocks.push(NoteBlockSpec::paragraph(""));
+    }
+    blocks
+}
+
+/// Renders one editable block back to its Markdown projection.
+pub fn render_note_block(block: &NoteBlockSpec) -> String {
+    let indentation = "  ".repeat(block.indent);
+    match &block.kind {
+        NoteBlockKind::Paragraph => block.text.clone(),
+        NoteBlockKind::Heading(level) => {
+            format!(
+                "{} {}",
+                "#".repeat(usize::from(*level).clamp(1, 6)),
+                block.text
+            )
+        }
+        NoteBlockKind::Quote => block
+            .text
+            .split('\n')
+            .map(|line| format!("> {line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        NoteBlockKind::Bullet => format!("{indentation}- {}", block.text),
+        NoteBlockKind::Ordered => format!("{indentation}1. {}", block.text),
+        NoteBlockKind::Todo => format!(
+            "{indentation}- [{}] {}",
+            if block.checked { "x" } else { " " },
+            block.text
+        ),
+        NoteBlockKind::Code { language } => {
+            format!("```{language}\n{}\n```", block.text)
+        }
+        NoteBlockKind::Rule => "---".into(),
+        NoteBlockKind::Callout { icon } => {
+            format!(":::callout {icon}\n{}\n:::", block.text)
+        }
+        NoteBlockKind::Toggle { expanded } => format!(
+            ":::toggle {}\n{}\n:::",
+            if *expanded { "open" } else { "closed" },
+            block.text
+        ),
+        NoteBlockKind::Equation => format!("$$\n{}\n$$", block.text),
+        NoteBlockKind::Bookmark => format!(":::bookmark\n{}\n:::", block.text),
+        NoteBlockKind::Protected => block.text.clone(),
+    }
+}
+
+fn parse_text(
+    text: &str,
+    protected: &HashMap<String, usize>,
+) -> Result<Vec<ParsedBlock>, NoteDocumentError> {
+    let scan = scan_note_blocks(text, true);
+    let mut result = Vec::with_capacity(scan.blocks.len());
+    for block in scan.blocks {
+        if matches!(block.kind, ScannedKind::ProtectedLine) {
+            let Some(protected_index) = protected.get(&block.rendered) else {
+                return Err(NoteDocumentError::ProtectedBlockChanged);
+            };
+            result.push(ParsedBlock {
+                rendered: block.rendered,
+                kind: None,
+                text: String::new(),
+                protected_index: Some(*protected_index),
+            });
+            continue;
+        }
+        result.push(ParsedBlock {
+            rendered: block.rendered,
+            kind: Some(editable_kind(&block.kind)),
+            text: block.text,
             protected_index: None,
         });
+    }
+    if let Some(error) = scan.first_error {
+        return Err(error);
     }
     if result.is_empty() {
         result.push(ParsedBlock {
@@ -530,6 +805,27 @@ fn parse_text(
     Ok(result)
 }
 
+fn editable_kind(kind: &ScannedKind) -> EditableKind {
+    match kind {
+        ScannedKind::Paragraph => EditableKind::Paragraph,
+        ScannedKind::Heading(level) => EditableKind::Heading(*level),
+        ScannedKind::Quote => EditableKind::Quote,
+        ScannedKind::Rule => EditableKind::Rule,
+        ScannedKind::Code(language) => EditableKind::Code(language.clone()),
+        ScannedKind::Bullet(indent) => EditableKind::Bullet(indent + 1),
+        ScannedKind::Ordered(indent) => EditableKind::Ordered(indent + 1),
+        ScannedKind::Todo { indent, checked } => EditableKind::Todo {
+            indent: indent + 1,
+            checked: *checked,
+        },
+        ScannedKind::Callout(icon) => EditableKind::Callout(icon.clone()),
+        ScannedKind::Toggle(expanded) => EditableKind::Toggle(*expanded),
+        ScannedKind::Equation => EditableKind::Equation,
+        ScannedKind::Bookmark => EditableKind::Bookmark,
+        ScannedKind::ProtectedLine => EditableKind::Paragraph,
+    }
+}
+
 fn has_markdown_hard_break(line: &str) -> bool {
     line.chars()
         .rev()
@@ -537,66 +833,6 @@ fn has_markdown_hard_break(line: &str) -> bool {
         .count()
         % 2
         == 1
-}
-
-fn parse_directive_body(lines: &[&str], index: &mut usize) -> Result<String, NoteDocumentError> {
-    *index += 1;
-    let mut body = Vec::new();
-    while *index < lines.len() && lines[*index] != ":::" {
-        body.push(lines[*index]);
-        *index += 1;
-    }
-    if *index == lines.len() {
-        return Err(NoteDocumentError::UnclosedDirective);
-    }
-    *index += 1;
-    Ok(body.join("\n"))
-}
-
-fn parse_line(line: &str) -> (EditableKind, String) {
-    if line == "---" {
-        return (EditableKind::Rule, String::new());
-    }
-    let heading = line
-        .chars()
-        .take_while(|character| *character == '#')
-        .count();
-    if (1..=6).contains(&heading) && line.as_bytes().get(heading) == Some(&b' ') {
-        return (
-            EditableKind::Heading(heading as u8),
-            line[heading + 1..].to_owned(),
-        );
-    }
-
-    let leading_spaces = line
-        .len()
-        .saturating_sub(line.trim_start_matches(' ').len());
-    let indent = leading_spaces / 2 + 1;
-    let value = &line[leading_spaces..];
-    for (prefix, checked) in [("- [ ] ", false), ("- [x] ", true), ("- [X] ", true)] {
-        if let Some(text) = value.strip_prefix(prefix) {
-            return (EditableKind::Todo { indent, checked }, text.to_owned());
-        }
-    }
-    if let Some(text) = value
-        .strip_prefix("- ")
-        .or_else(|| value.strip_prefix("* "))
-    {
-        return (EditableKind::Bullet(indent), text.to_owned());
-    }
-    if let Some((number, text)) = value.split_once(". ")
-        && !number.is_empty()
-        && number.bytes().all(|byte| byte.is_ascii_digit())
-    {
-        return (EditableKind::Ordered(indent), text.to_owned());
-    }
-    if let Some((number, text)) = value.split_once(") ")
-        && !number.is_empty()
-        && number.bytes().all(|byte| byte.is_ascii_digit())
-    {
-        return (EditableKind::Ordered(indent), text.to_owned());
-    }
-    (EditableKind::Paragraph, line.to_owned())
 }
 
 fn same_kind(left: Option<&EditableKind>, right: Option<&EditableKind>) -> bool {
@@ -1146,5 +1382,172 @@ mod tests {
             apply_note_text(&content, &projection.text).unwrap(),
             content
         );
+    }
+
+    #[test]
+    fn note_blocks_parse_and_render_supported_markdown_without_loss() {
+        let source = "# Title\nparagraph\n  - nested\n- [x] done\n> one\n> two\n```rust\nfn main() {}\n```\n---";
+        let blocks = parse_note_blocks(source);
+
+        assert_eq!(blocks.len(), 7);
+        assert_eq!(blocks[0].kind, NoteBlockKind::Heading(1));
+        assert_eq!(blocks[2].kind, NoteBlockKind::Bullet);
+        assert_eq!(blocks[2].indent, 1);
+        assert_eq!(blocks[3].kind, NoteBlockKind::Todo);
+        assert!(blocks[3].checked);
+        assert_eq!(blocks[4].text, "one\ntwo");
+        assert_eq!(
+            blocks
+                .iter()
+                .map(render_note_block)
+                .collect::<Vec<_>>()
+                .join("\n"),
+            source
+        );
+    }
+
+    #[test]
+    fn empty_documents_keep_one_editable_paragraph() {
+        assert_eq!(parse_note_blocks(""), vec![NoteBlockSpec::paragraph("")]);
+    }
+
+    #[test]
+    fn advanced_blocks_parse_and_render_without_losing_state() {
+        let source = ":::callout ✅\nDone\n:::\n:::toggle closed\nDetails\n:::\n$$\nx + y\n$$\n:::bookmark\nhttps://example.com\n:::";
+        let blocks = parse_note_blocks(source);
+
+        assert_eq!(blocks.len(), 4);
+        assert_eq!(blocks[0].kind, NoteBlockKind::Callout { icon: "✅".into() });
+        assert_eq!(blocks[1].kind, NoteBlockKind::Toggle { expanded: false });
+        assert_eq!(blocks[2].kind, NoteBlockKind::Equation);
+        assert_eq!(blocks[3].kind, NoteBlockKind::Bookmark);
+        assert_eq!(
+            blocks
+                .iter()
+                .map(render_note_block)
+                .collect::<Vec<_>>()
+                .join("\n"),
+            source
+        );
+    }
+
+    #[test]
+    fn markdown_hard_breaks_stay_inside_one_rich_block() {
+        let source = "first\\\n**second**\nafter";
+        let blocks = parse_note_blocks(source);
+
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].kind, NoteBlockKind::Paragraph);
+        assert_eq!(blocks[0].text, "first\\\n**second**");
+        assert_eq!(
+            blocks
+                .iter()
+                .map(render_note_block)
+                .collect::<Vec<_>>()
+                .join("\n"),
+            source
+        );
+
+        let literal_backslash = parse_note_blocks("literal\\\\\nafter");
+        assert_eq!(literal_backslash.len(), 2);
+    }
+
+    #[test]
+    fn prose_like_blocks_share_the_native_inline_rich_text_surface() {
+        assert!(NoteBlockKind::Paragraph.supports_inline_rich_text());
+        assert!(NoteBlockKind::Quote.supports_inline_rich_text());
+        assert!(
+            NoteBlockKind::Callout {
+                icon: "💡".into()
+            }
+            .supports_inline_rich_text()
+        );
+        assert!(!NoteBlockKind::Toggle { expanded: true }.supports_inline_rich_text());
+        assert!(
+            !NoteBlockKind::Code {
+                language: "rust".into()
+            }
+            .supports_inline_rich_text()
+        );
+    }
+
+    #[test]
+    fn lenient_block_parse_keeps_unclosed_fences_editable() {
+        let code = parse_note_blocks("```rust\nfn main() {}");
+        assert_eq!(code.len(), 1);
+        assert_eq!(
+            code[0].kind,
+            NoteBlockKind::Code {
+                language: "rust".into()
+            }
+        );
+        assert_eq!(code[0].text, "fn main() {}");
+        assert_eq!(render_note_block(&code[0]), "```rust\nfn main() {}\n```");
+
+        let directive = parse_note_blocks(":::callout 💡\nmissing");
+        assert_eq!(directive.len(), 1);
+        assert_eq!(
+            directive[0].kind,
+            NoteBlockKind::Callout {
+                icon: "💡".into()
+            }
+        );
+        assert_eq!(directive[0].text, "missing");
+
+        let equation = parse_note_blocks("$$\nx + y");
+        assert_eq!(equation.len(), 1);
+        assert_eq!(equation[0].kind, NoteBlockKind::Equation);
+        assert_eq!(equation[0].text, "x + y");
+    }
+
+    #[test]
+    fn lenient_block_parse_keeps_protected_markers_verbatim() {
+        let marker = "⟦ideall:受保护块:0:img:0123456789abcdef⟧";
+        let blocks = parse_note_blocks(&format!("before\n{marker}\nafter"));
+
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks[1].kind, NoteBlockKind::Protected);
+        assert_eq!(blocks[1].text, marker);
+        assert_eq!(render_note_block(&blocks[1]), marker);
+    }
+
+    #[test]
+    fn ordered_blocks_accept_dot_and_parenthesis_markers() {
+        let blocks = parse_note_blocks("1. dot\n2) paren");
+
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].kind, NoteBlockKind::Ordered);
+        assert_eq!(blocks[1].kind, NoteBlockKind::Ordered);
+        assert_eq!(blocks[1].text, "paren");
+        // Rendering normalizes both markers to the canonical dot form.
+        assert_eq!(
+            blocks
+                .iter()
+                .map(render_note_block)
+                .collect::<Vec<_>>()
+                .join("\n"),
+            "1. dot\n1. paren"
+        );
+    }
+
+    #[test]
+    fn block_specs_and_strict_projection_share_one_scanner() {
+        let sources = [
+            "# Title\nparagraph\n  - nested\n- [x] done\n> quote\n```rust\nfn main() {}\n```\n---",
+            ":::callout ✅\nDone\n:::\n:::toggle closed\nDetails\n:::\n$$\nx + y\n$$\n:::bookmark\nhttps://example.com\n:::",
+            "first\\\n**second**\nafter",
+            "1. one\n  2) two\n- [ ] todo",
+            "> one\\\n> two",
+        ];
+        for source in sources {
+            let blocks = parse_note_blocks(source);
+            let rendered = blocks
+                .iter()
+                .map(render_note_block)
+                .collect::<Vec<_>>()
+                .join("\n");
+            let document = apply_note_text(&[], &rendered).unwrap();
+            assert_eq!(project_note(&document).text, rendered);
+        }
     }
 }

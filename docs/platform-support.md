@@ -41,7 +41,7 @@ native/
 │   ├── ideall-domain/
 │   ├── ideall-application/
 │   ├── ideall-presentation/
-│   └── ideall-{storage,sync,sync-http,agent,acp,secrets,updater,webmeta}/
+│   └── ideall-{storage,sync,agent,acp,secrets,updater}/
 ├── scripts/                  # 打包、产物校验和模拟器冒烟
 └── vendor/gpui-mobile/       # 可追溯的固定上游快照
 ```

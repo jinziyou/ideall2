@@ -86,7 +86,7 @@ native/apps/ideall-desktop/src/
 - Surface 提供地址导航、前进/后退、刷新、外部打开和返回书签编辑 Engine；浏览历史仍只属于
   Browser 会话状态。
 - 工具条提供「存为书签」一键捕获：地址经归一校验后落入收集箱，零确认；捕获成功后由
-  `ideall-webmeta` 在后台静默补全标题、摘要、favicon 与 canonical URL，失败不影响捕获。
+  desktop 的 `webmeta` 模块在后台静默补全标题、摘要、favicon 与 canonical URL，失败不影响捕获。
 - macOS/Windows 使用受限子 WebView；Linux 当前明确交给系统浏览器。
 - Browser 历史属于组件会话状态，不进入 Node 正文或 workspace 标签身份。
 

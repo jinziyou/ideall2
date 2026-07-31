@@ -6,8 +6,8 @@
 
 | 命令 | 用途 |
 | --- | --- |
-| `pnpm app:dev` / `pnpm dev` | 启动 GPUI 桌面 App |
-| `pnpm app:build` / `pnpm build` | Release 构建并打包桌面 App |
+| `pnpm app:dev` | 启动 GPUI 桌面 App |
+| `pnpm app:build` | Release 构建并打包桌面 App |
 | `pnpm native:check` | 检查 workspace 全 targets 与移动 host-check |
 | `pnpm native:test` | 运行全部 Rust 测试 |
 | `pnpm native:lint` | rustfmt 与 clippy `-D warnings` |
@@ -25,13 +25,6 @@
 | `pnpm test:scripts` | 隔离运行 `scripts/*.test.mjs` |
 | `pnpm verify:checks` | 运行格式、文档、Actions、版本与脚本门禁 |
 | `pnpm verify` | 在轻量门禁后运行完整原生 fmt/clippy/test |
-
-`test:scripts` 支持用文件名子串过滤：
-
-```bash
-pnpm test:scripts -- native-release
-pnpm test:scripts -- native-mobile
-```
 
 ## 发布与目录
 

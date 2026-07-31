@@ -1,7 +1,9 @@
-//! UI- and transport-independent pieces of ideall's encrypted sync protocol.
+//! UI-independent pieces of ideall's encrypted sync protocol, plus a bounded
+//! HTTP transport for it.
 
 mod notes;
 mod runner;
+pub mod transport;
 
 pub use notes::{gc_sync_notes, merge_sync_notes};
 pub use runner::{

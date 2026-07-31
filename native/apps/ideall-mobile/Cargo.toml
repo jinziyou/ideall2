@@ -17,13 +17,13 @@ mobile-ui-host-check = ["mobile-runtime"]
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
+ideall-agent = { path = "../../crates/ideall-agent" }
 ideall-application = { path = "../../crates/ideall-application" }
 ideall-domain = { path = "../../crates/ideall-domain" }
 ideall-presentation = { path = "../../crates/ideall-presentation" }
 ideall-protocol = { path = "../../crates/ideall-protocol" }
 ideall-secrets = { path = "../../crates/ideall-secrets" }
 ideall-sync = { path = "../../crates/ideall-sync" }
-ideall-sync-http = { path = "../../crates/ideall-sync-http" }
 log = "0.4"
 serde_json.workspace = true
 unicode-segmentation.workspace = true

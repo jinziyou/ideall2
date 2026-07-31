@@ -2,7 +2,7 @@
 
 use std::{io::Read as _, time::Duration};
 
-use ideall_sync::{SyncGenerationPart, SyncManifest, SyncTransport, TransportError};
+use crate::{SyncGenerationPart, SyncManifest, SyncTransport, TransportError};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 use url::Url;

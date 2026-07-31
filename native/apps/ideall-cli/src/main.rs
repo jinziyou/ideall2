@@ -9,7 +9,7 @@ use ideall_storage::{
     ArchiveLimits, Database, decrypt_workspace_archive, import_workspace_archive_atomic,
     is_encrypted_workspace_archive, parse_workspace_archive,
 };
-use ideall_sync_http::HttpSyncTransport;
+use ideall_sync::transport::HttpSyncTransport;
 use ideall_updater::parse_verified_manifest;
 use minisign::{SecretKeyBox, sign};
 

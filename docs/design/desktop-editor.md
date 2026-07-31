@@ -99,16 +99,16 @@ application 拒绝写入，避免吞并后续内容。
 
 ```text
 ideall-application/src/
+├── note_document.rs # 统一块解析与回写、受保护块校验（双端共用）
 ├── note_edit.rs       # 跨端块、斜杠命令和安全校验
 ├── note_rich_text.rs  # 纯文本、range marks、语义色板、内部提及与 Markdown 可逆投影
 └── workspace.rs       # 本地 Plate 反向链接查询
 
 ideall-desktop/src/editor/
-├── mod.rs        # 输入、草稿和会话
-├── blocks.rs    # 原生块种类、Markdown 投影解析与回写
-├── commands.rs  # 块输入事件、结构命令、历史、状态反馈
-├── actions.rs   # 标签动作
-├── rich_input.rs # GPUI 富文本、IME、多行折行、选区、剪贴板、提及与 UTF-8/UTF-16 换算
+├── mod.rs        # 块部件、输入、草稿和会话
+├── commands.rs   # 块输入事件、结构命令、历史、状态反馈
+├── actions.rs    # 标签动作
+├── rich_input.rs # GPUI 富文本与纯文本模式、IME、多行折行、选区、剪贴板、提及与 UTF-8/UTF-16 换算
 └── view.rs       # 块画布、手柄菜单、斜杠/提及菜单、反向链接与 Engine 视觉
 ```
 

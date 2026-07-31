@@ -15,11 +15,11 @@ protocol → domain → application → adapters → UI → platform app
   目录（`INBOX_ROOT_ID`）承接未整理捕获。
 - `ideall-presentation`：文案、导航模型、设计 Token 和无 GPUI 类型的视图状态。
 - `ideall-storage`：SQLite 权威数据、迁移与归档。
-- `ideall-sync` / `ideall-sync-http`：端到端加密同步与网络适配。
+- `ideall-sync`：端到端加密同步与网络适配（HTTP 传输为其 `transport` 模块）。
 - `ideall-agent` / `ideall-acp`：Grant、MCP 工具、模型传输和外部 ACP 客户端。
 - `ideall-secrets` / `ideall-updater`：平台凭据库与签名更新。
-- `ideall-webmeta`：书签页面的有界 HTML 元数据抓取（标题、摘要、favicon 与 canonical）。
-- `ideall-desktop` / `ideall-mobile`：平台组合根和 GPUI Render 层。
+- `ideall-desktop` / `ideall-mobile`：平台组合根和 GPUI Render 层；书签页面的有界 HTML
+  元数据抓取是 desktop 的内部模块。
 
 共享 crate 的公开 API 不得包含 GPUI、SQLite、HTTP 或平台系统类型。依赖只能沿上图向右；
 UI 不得直接穿过 application 层修改存储。

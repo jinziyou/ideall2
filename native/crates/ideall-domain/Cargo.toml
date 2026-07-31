@@ -11,6 +11,8 @@ repository.workspace = true
 [dependencies]
 ideall-protocol = { path = "../ideall-protocol" }
 serde.workspace = true
+
+[dev-dependencies]
 serde_json.workspace = true
 
 [lints]

@@ -161,10 +161,16 @@ mod mobile {
         },
         packages::webview::{WebViewHandle, WebViewSettings},
     };
+    use ideall_agent::{AgentAuditRecord, AuditStatus, ModelRole};
     use ideall_application::{
-        AgentAuditRecord, AgentModelSettings, AgentTranscriptMessage, AuditStatus, HOME_ROOT_ID,
-        INBOX_ROOT_ID, LocalWorkspace, ModelRole, NodeSummary, OpenAiCompatibleClient,
-        SyncSettings,
+        AGENT_MODEL_SETTINGS_SAVED_STATUS, AGENT_PROMPT_EMPTY_STATUS, AGENT_THREAD_OPENED_STATUS,
+        AGENT_TURN_IN_PROGRESS_STATUS, AgentModelSettingsDraft, AgentTranscriptMessage,
+        CredentialKey, CredentialStore, HOME_ROOT_ID, INBOX_ROOT_ID, LocalWorkspace,
+        MAX_IMPORT_BYTES, NEW_AGENT_THREAD_STATUS, NodeSummary, PersistedAgentModelSettings,
+        PersistedSyncSettings, SEARCH_IN_PROGRESS_STATUS, SYNC_CREDENTIALS_CLEARED_STATUS,
+        SYNC_IN_PROGRESS_STATUS, SYNC_SETTINGS_SAVED_STATUS, SyncSettingsDraft,
+        clear_sync_credentials, credential_configured, require_credential, search_failed_status,
+        search_results_status, sync_secret_status,
     };
     use ideall_domain::{
         EnginePlatform, TabDescriptor, WorkspaceState, engine_runtime_capabilities, tab_key,
@@ -179,8 +185,7 @@ mod mobile {
     };
     use ideall_protocol::{EngineAccess, FileRef, Node, NodeKind, SubscriptionType};
     use ideall_secrets::{SecretKey, SecretStore as _, SystemSecretStore};
-    use ideall_sync::{is_valid_sync_code, normalize_sync_code};
-    use ideall_sync_http::HttpSyncTransport;
+    use ideall_sync::transport::HttpSyncTransport;
 
     const INFO_PORTAL_URL: &str = "https://www.wonita.link/info";
     const COMMUNITY_PORTAL_URL: &str = "https://www.wonita.link/community";
@@ -204,6 +209,39 @@ mod mobile {
         AgentModel,
         AgentKey,
         AgentPrompt,
+    }
+
+    /// Backs the application credential use cases with the platform keyring so
+    /// the application crate never links the secrets adapter.
+    struct PlatformCredentialStore;
+
+    impl CredentialStore for PlatformCredentialStore {
+        fn get(&self, key: CredentialKey) -> Result<Option<String>, String> {
+            SystemSecretStore
+                .get(secret_key(key))
+                .map_err(|error| error.to_string())
+        }
+
+        fn set(&self, key: CredentialKey, value: &str) -> Result<(), String> {
+            SystemSecretStore
+                .set(secret_key(key), value)
+                .map_err(|error| error.to_string())
+        }
+
+        fn delete(&self, key: CredentialKey) -> Result<(), String> {
+            SystemSecretStore
+                .delete(secret_key(key))
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+    }
+
+    fn secret_key(key: CredentialKey) -> SecretKey {
+        match key {
+            CredentialKey::SyncCode => SecretKey::SyncCode,
+            CredentialKey::SyncBearerToken => SecretKey::SyncBearerToken,
+            CredentialKey::AgentCredential => SecretKey::AgentCredential,
+        }
     }
 
     struct MobileStartupFailure {
@@ -262,7 +300,7 @@ mod mobile {
         database_path: PathBuf,
         service: LocalWorkspace,
         workspace: WorkspaceState,
-        secret_store: SystemSecretStore,
+        secret_store: PlatformCredentialStore,
         items: Vec<NodeSummary>,
         selected_id: Option<String>,
         selected_kind: Option<NodeKind>,
@@ -330,17 +368,11 @@ mod mobile {
                 .unwrap_or_default()
                 .server_base_url;
             let agent_settings = service.load_agent_model_settings().unwrap_or_default();
-            let secret_store = SystemSecretStore;
-            let agent_key_configured = secret_store
-                .get(SecretKey::AgentCredential)
-                .ok()
-                .flatten()
-                .is_some();
-            let agent_thread_id = service
-                .list_agent_threads(1)
-                .ok()
-                .and_then(|mut threads| threads.pop())
-                .map(|thread| thread.id);
+            let secret_store = PlatformCredentialStore;
+            let agent_key_configured =
+                credential_configured(&secret_store, CredentialKey::AgentCredential)
+                    .unwrap_or(false);
+            let agent_thread_id = service.latest_agent_thread_id().ok().flatten();
             let agent_transcript = agent_thread_id
                 .as_deref()
                 .and_then(|id| service.agent_transcript(id).ok())
@@ -400,7 +432,7 @@ mod mobile {
             if let Some(id) = restore_id
                 && let Ok(node) = this.service.node(&id)
             {
-                let (text, editable, protected_blocks) = this.node_body(&node);
+                let (text, editable, protected_blocks) = this.service.node_body(&node);
                 this.draft_title = node.base().title.clone();
                 this.selected_id = Some(id);
                 this.selected_kind = Some(node.kind());
@@ -460,17 +492,14 @@ mod mobile {
             }
 
             self.active_section = "搜索";
-            self.status = "正在搜索本地内容…".into();
+            self.status = SEARCH_IN_PROGRESS_STATUS.into();
             let database_path = self.database_path.clone();
             let timer = cx.background_executor().timer(SEARCH_DEBOUNCE_DELAY);
             self.search_task = Some(cx.spawn(async move |view, cx| {
                 timer.await;
                 let query_for_search = query.clone();
                 let search = cx.background_executor().spawn(async move {
-                    let workspace =
-                        LocalWorkspace::open(database_path).map_err(|error| error.to_string())?;
-                    workspace
-                        .search(&query_for_search, 200)
+                    LocalWorkspace::search_at(database_path, &query_for_search, 200, None)
                         .map_err(|error| error.to_string())
                 });
                 let result = search.await;
@@ -488,10 +517,10 @@ mod mobile {
                             Ok(items) => {
                                 let count = items.len();
                                 this.items = items;
-                                this.status = format!("找到 {count} 条本地内容");
+                                this.status = search_results_status(count);
                             }
                             Err(error) => {
-                                this.status = format!("搜索失败：{error}");
+                                this.status = search_failed_status(&error);
                             }
                         }
                         cx.notify();
@@ -536,20 +565,8 @@ mod mobile {
         }
 
         fn create_bookmark(&mut self, cx: &mut Context<Self>) {
-            let parent = match self.creation_parent() {
-                Some(parent) => Some(parent),
-                // 未选中目录时书签先落入收集箱，不再直接挂到首页。
-                None => match self.service.ensure_inbox() {
-                    Ok(inbox) => Some(inbox),
-                    Err(error) => {
-                        self.status = error.to_string();
-                        cx.notify();
-                        return;
-                    }
-                },
-            };
-            match self.service.create_bookmark(
-                parent.as_deref(),
+            match self.service.create_bookmark_with_inbox_fallback(
+                self.creation_parent().as_deref(),
                 "新建书签",
                 "https://example.com/",
             ) {
@@ -624,7 +641,7 @@ mod mobile {
                                         parent.as_deref(),
                                         &import_path,
                                         &file.name,
-                                        256 * 1024 * 1024,
+                                        MAX_IMPORT_BYTES,
                                     ) {
                                         Ok(_) => imported += 1,
                                         Err(error) => {
@@ -667,33 +684,28 @@ mod mobile {
             cx.notify();
         }
 
-        fn persist_agent_model_settings(&mut self) -> Result<(), String> {
-            let saved = self
+        fn persist_agent_model_settings(&mut self) -> Result<PersistedAgentModelSettings, String> {
+            let draft = AgentModelSettingsDraft {
+                base_url: self.agent_base_url_draft.clone(),
+                model: self.agent_model_draft.clone(),
+                api_key: self.agent_key_draft.clone(),
+            };
+            let persisted = self
                 .service
-                .save_agent_model_settings(&AgentModelSettings {
-                    base_url: self.agent_base_url_draft.clone(),
-                    model: self.agent_model_draft.clone(),
-                })
-                .map_err(|error| error.to_string())?;
-            self.agent_base_url_draft = saved.base_url.clone();
-            self.agent_model_draft = saved.model.clone();
-            if !self.agent_key_draft.trim().is_empty() {
-                let key = self.agent_key_draft.trim();
-                OpenAiCompatibleClient::new(&saved.base_url, &saved.model, key)
-                    .map_err(|error| error.to_string())?;
-                self.secret_store
-                    .set(SecretKey::AgentCredential, key)
-                    .map_err(|error| error.to_string())?;
+                .persist_agent_model_settings(&draft, &self.secret_store)?;
+            self.agent_base_url_draft = persisted.settings.base_url.clone();
+            self.agent_model_draft = persisted.settings.model.clone();
+            if persisted.api_key_saved {
                 self.agent_key_draft.clear();
                 self.agent_key_configured = true;
             }
-            Ok(())
+            Ok(persisted)
         }
 
         fn save_agent_model_settings(&mut self, cx: &mut Context<Self>) {
             self.stop_editing();
             self.status = match self.persist_agent_model_settings() {
-                Ok(()) => "模型设置已保存；API Key 仅在系统安全存储中".into(),
+                Ok(_) => AGENT_MODEL_SETTINGS_SAVED_STATUS.into(),
                 Err(error) => error,
             };
             cx.notify();
@@ -701,7 +713,7 @@ mod mobile {
 
         fn clear_agent_credential(&mut self, cx: &mut Context<Self>) {
             self.stop_editing();
-            match self.secret_store.delete(SecretKey::AgentCredential) {
+            match self.secret_store.delete(CredentialKey::AgentCredential) {
                 Ok(_) => {
                     self.agent_key_draft.clear();
                     self.agent_key_configured = false;
@@ -720,7 +732,7 @@ mod mobile {
             self.agent_thread_id = None;
             self.agent_transcript.clear();
             self.agent_prompt_draft.clear();
-            self.status = "已开始新对话；发送第一条消息后写入本地 SQLite".into();
+            self.status = NEW_AGENT_THREAD_STATUS.into();
             cx.notify();
         }
 
@@ -730,15 +742,9 @@ mod mobile {
             }
             let database_path = self.database_path.clone();
             let task = cx.background_executor().spawn(async move {
-                let workspace =
-                    LocalWorkspace::open(database_path).map_err(|error| error.to_string())?;
-                let audits = workspace
-                    .list_agent_audits(50)
-                    .map_err(|error| error.to_string())?;
-                let threads = workspace
-                    .list_agent_threads(12)
-                    .map_err(|error| error.to_string())?;
-                Ok::<_, String>((audits, threads))
+                LocalWorkspace::open(database_path)
+                    .and_then(|workspace| workspace.agent_activity())
+                    .map_err(|error| error.to_string())
             });
             self.agent_activity_loading = true;
             cx.spawn(async move |view, cx| {
@@ -750,9 +756,9 @@ mod mobile {
                     view.update(cx, |this, cx| {
                         this.agent_activity_loading = false;
                         match result {
-                            Ok((audits, threads)) => {
-                                this.agent_audits = audits;
-                                this.agent_threads = threads;
+                            Ok(activity) => {
+                                this.agent_audits = activity.audits;
+                                this.agent_threads = activity.threads;
                             }
                             Err(error) => {
                                 this.status = format!("加载 Agent 活动失败：{error}");
@@ -774,7 +780,7 @@ mod mobile {
                 Ok(messages) => {
                     self.agent_thread_id = Some(thread_id);
                     self.agent_transcript = messages;
-                    self.status = "已打开本地 Agent 对话".into();
+                    self.status = AGENT_THREAD_OPENED_STATUS.into();
                 }
                 Err(error) => self.status = error.to_string(),
             }
@@ -786,52 +792,40 @@ mod mobile {
                 return;
             }
             self.stop_editing();
-            if let Err(error) = self.persist_agent_model_settings() {
-                self.status = error;
-                cx.notify();
-                return;
-            }
-            let prompt = self.agent_prompt_draft.clone();
-            if prompt.trim().is_empty() {
-                self.status = "请输入 Agent 消息".into();
-                cx.notify();
-                return;
-            }
-            let settings = match self.service.load_agent_model_settings() {
-                Ok(settings) => settings,
+            let persisted = match self.persist_agent_model_settings() {
+                Ok(persisted) => persisted,
                 Err(error) => {
-                    self.status = error.to_string();
+                    self.status = error;
                     cx.notify();
                     return;
                 }
             };
-            let key = match self.secret_store.get(SecretKey::AgentCredential) {
-                Ok(Some(key)) => key,
-                Ok(None) => {
-                    self.status = "请先安全保存模型 API Key".into();
-                    cx.notify();
-                    return;
-                }
+            let prompt = self.agent_prompt_draft.clone();
+            if prompt.trim().is_empty() {
+                self.status = AGENT_PROMPT_EMPTY_STATUS.into();
+                cx.notify();
+                return;
+            }
+            let key = match require_credential(&self.secret_store, CredentialKey::AgentCredential) {
+                Ok(key) => key,
                 Err(error) => {
-                    self.status = error.to_string();
+                    self.status = error;
                     cx.notify();
                     return;
                 }
             };
             let database_path = self.database_path.clone();
             let thread_id = self.agent_thread_id.clone();
+            let settings = persisted.settings;
             let task = cx.background_executor().spawn(async move {
                 let mut workspace =
                     LocalWorkspace::open(database_path).map_err(|error| error.to_string())?;
-                let mut provider =
-                    OpenAiCompatibleClient::new(&settings.base_url, &settings.model, &key)
-                        .map_err(|error| error.to_string())?;
                 workspace
-                    .run_agent_turn(&mut provider, thread_id.as_deref(), &prompt)
+                    .run_openai_agent_turn(&settings, &key, thread_id.as_deref(), &prompt, None)
                     .map_err(|error| error.to_string())
             });
             self.agent_in_progress = true;
-            self.status = "Agent 正在本机直连模型服务……".into();
+            self.status = AGENT_TURN_IN_PROGRESS_STATUS.into();
             cx.spawn(async move |view, cx| {
                 let result = task.await;
                 cx.update(|cx| {
@@ -849,26 +843,12 @@ mod mobile {
                                     .unwrap_or_default();
                                 this.agent_prompt_draft.clear();
                                 this.refresh();
-                                let failures = result.tools.iter().filter(|tool| !tool.ok).count();
-                                this.status = if result.tools.is_empty() {
-                                    "Agent 已回复；对话保存在本地 SQLite".into()
-                                } else {
-                                    format!(
-                                        "Agent 已回复；执行 {} 个工具，{} 个失败；写操作均已审计",
-                                        result.tools.len(),
-                                        failures
-                                    )
-                                };
+                                this.status = result.status_line();
                             }
                             Err(error) => {
-                                if this.agent_thread_id.is_none()
-                                    && let Some(thread) = this
-                                        .service
-                                        .list_agent_threads(1)
-                                        .ok()
-                                        .and_then(|mut threads| threads.pop())
-                                {
-                                    this.agent_thread_id = Some(thread.id);
+                                if this.agent_thread_id.is_none() {
+                                    this.agent_thread_id =
+                                        this.service.latest_agent_thread_id().ok().flatten();
                                 }
                                 if let Some(thread_id) = this.agent_thread_id.as_deref() {
                                     this.agent_transcript = this
@@ -919,7 +899,7 @@ mod mobile {
             self.embedded_browser = None;
             match self.service.node(&id) {
                 Ok(node) => {
-                    let (text, editable, protected_blocks) = self.node_body(&node);
+                    let (text, editable, protected_blocks) = self.service.node_body(&node);
                     let title = node.base().title.clone();
                     let kind = node.kind();
                     self.draft_title = node.base().title.clone();
@@ -950,36 +930,6 @@ mod mobile {
                 Err(error) => self.status = error.to_string(),
             }
             cx.notify();
-        }
-
-        fn node_body(&self, node: &Node) -> (String, bool, usize) {
-            match node {
-                Node::Note { base, .. } => self
-                    .service
-                    .plain_note(&base.id)
-                    .map(|document| (document.text, document.editable, document.protected_blocks))
-                    .unwrap_or_else(|error| (error.to_string(), false, 0)),
-                Node::Bookmark { content, .. } => (content.url.clone(), true, 0),
-                Node::File { base, blob_ref, .. } => self
-                    .service
-                    .text_file(&base.id)
-                    .map(|document| (document.text, true, 0))
-                    .unwrap_or_else(|_| {
-                        (
-                            format!(
-                                "{} · {} 字节\nBlob：{}",
-                                blob_ref.mime, blob_ref.size, blob_ref.key
-                            ),
-                            false,
-                            0,
-                        )
-                    }),
-                Node::Folder { .. } => ("文件夹".into(), false, 0),
-                Node::Feed { content, .. } => (content.key.clone(), false, 0),
-                Node::Thread { content, .. } => {
-                    (format!("{} 条消息", content.messages.len()), false, 0)
-                }
-            }
         }
 
         fn focus_field(&mut self, field: FocusedField, keyboard_type: KeyboardType) {
@@ -1229,12 +1179,9 @@ mod mobile {
             self.autosave_task = Some(cx.spawn(async move |view, cx| {
                 timer.await;
                 let save_task = cx.background_executor().spawn(async move {
-                    let mut workspace =
-                        LocalWorkspace::open(database_path).map_err(|error| error.to_string())?;
-                    let node = workspace
-                        .save_edits(&id, title, body.as_deref())
-                        .map_err(|error| error.to_string())?;
-                    Ok::<_, String>((id, NodeSummary::from(&node)))
+                    LocalWorkspace::save_draft_at(database_path, &id, title, body.as_deref())
+                        .map(|summary| (id, summary))
+                        .map_err(|error| error.to_string())
                 });
                 let result = save_task.await;
                 cx.update(|cx| {
@@ -1477,60 +1424,40 @@ mod mobile {
         }
 
         fn refresh_sync_secret_status(&mut self) {
-            match self.secret_store.get(SecretKey::SyncCode) {
-                Ok(value) => self.sync_code_configured = value.is_some(),
-                Err(error) => self.status = error.to_string(),
-            }
-            match self.secret_store.get(SecretKey::SyncBearerToken) {
-                Ok(value) => self.sync_token_configured = value.is_some(),
-                Err(error) => self.status = error.to_string(),
+            match sync_secret_status(&self.secret_store) {
+                Ok(secrets) => {
+                    self.sync_code_configured = secrets.sync_code_configured;
+                    self.sync_token_configured = secrets.sync_token_configured;
+                }
+                Err(error) => self.status = error,
             }
         }
 
-        fn persist_sync_settings(&mut self) -> Result<(), String> {
-            let saved = self
+        fn persist_sync_settings(&mut self) -> Result<PersistedSyncSettings, String> {
+            let draft = SyncSettingsDraft {
+                server_base_url: self.sync_server_draft.clone(),
+                sync_code: self.sync_code_draft.clone(),
+                bearer_token: self.sync_token_draft.clone(),
+            };
+            let persisted = self
                 .service
-                .save_sync_settings(&SyncSettings {
-                    server_base_url: self.sync_server_draft.clone(),
-                })
-                .map_err(|error| error.to_string())?;
-            self.sync_server_draft = saved.server_base_url;
-
-            if !self.sync_code_draft.trim().is_empty() {
-                if !is_valid_sync_code(&self.sync_code_draft) {
-                    return Err("同步码必须恰好包含 32 位十六进制字符".into());
-                }
-                self.secret_store
-                    .set(
-                        SecretKey::SyncCode,
-                        &normalize_sync_code(&self.sync_code_draft),
-                    )
-                    .map_err(|error| error.to_string())?;
+                .persist_sync_settings(&draft, &self.secret_store)?;
+            self.sync_server_draft = persisted.settings.server_base_url.clone();
+            if persisted.sync_code_saved {
                 self.sync_code_draft.clear();
                 self.sync_code_configured = true;
             }
-            if !self.sync_token_draft.trim().is_empty() {
-                if !self
-                    .sync_token_draft
-                    .trim()
-                    .bytes()
-                    .all(|byte| byte.is_ascii_graphic())
-                {
-                    return Err("Bearer Token 只能包含可打印 ASCII 字符".into());
-                }
-                self.secret_store
-                    .set(SecretKey::SyncBearerToken, self.sync_token_draft.trim())
-                    .map_err(|error| error.to_string())?;
+            if persisted.bearer_token_saved {
                 self.sync_token_draft.clear();
                 self.sync_token_configured = true;
             }
-            Ok(())
+            Ok(persisted)
         }
 
         fn save_sync_settings(&mut self, cx: &mut Context<Self>) {
             self.stop_editing();
             self.status = match self.persist_sync_settings() {
-                Ok(()) => "同步设置已安全保存".into(),
+                Ok(_) => SYNC_SETTINGS_SAVED_STATUS.into(),
                 Err(error) => error,
             };
             cx.notify();
@@ -1538,19 +1465,15 @@ mod mobile {
 
         fn clear_sync_credentials(&mut self, cx: &mut Context<Self>) {
             self.stop_editing();
-            let result = self
-                .secret_store
-                .delete(SecretKey::SyncCode)
-                .and_then(|_| self.secret_store.delete(SecretKey::SyncBearerToken));
-            match result {
-                Ok(_) => {
+            match clear_sync_credentials(&self.secret_store) {
+                Ok(()) => {
                     self.sync_code_draft.clear();
                     self.sync_token_draft.clear();
                     self.sync_code_configured = false;
                     self.sync_token_configured = false;
-                    self.status = "同步凭据已从系统安全存储清除".into();
+                    self.status = SYNC_CREDENTIALS_CLEARED_STATUS.into();
                 }
-                Err(error) => self.status = error.to_string(),
+                Err(error) => self.status = error,
             }
             cx.notify();
         }
@@ -1560,64 +1483,44 @@ mod mobile {
                 return;
             }
             self.stop_editing();
-            if let Err(error) = self.persist_sync_settings() {
-                self.status = error;
-                cx.notify();
-                return;
-            }
-            let settings = match self.service.load_sync_settings() {
-                Ok(settings) => settings,
+            let persisted = match self.persist_sync_settings() {
+                Ok(persisted) => persisted,
                 Err(error) => {
-                    self.status = error.to_string();
+                    self.status = error;
                     cx.notify();
                     return;
                 }
             };
-            let sync_code = match self.secret_store.get(SecretKey::SyncCode) {
-                Ok(Some(value)) => value,
-                Ok(None) => {
-                    self.status = "请先保存同步码".into();
-                    cx.notify();
-                    return;
-                }
+            let sync_code = match require_credential(&self.secret_store, CredentialKey::SyncCode) {
+                Ok(value) => value,
                 Err(error) => {
-                    self.status = error.to_string();
+                    self.status = error;
                     cx.notify();
                     return;
                 }
             };
-            let token = match self.secret_store.get(SecretKey::SyncBearerToken) {
-                Ok(Some(value)) => value,
-                Ok(None) => {
-                    self.status = "请先保存登录 Bearer Token".into();
-                    cx.notify();
-                    return;
-                }
+            let token = match require_credential(&self.secret_store, CredentialKey::SyncBearerToken)
+            {
+                Ok(value) => value,
                 Err(error) => {
-                    self.status = error.to_string();
+                    self.status = error;
                     cx.notify();
                     return;
                 }
             };
             let database_path = self.database_path.clone();
+            let server_base_url = persisted.settings.server_base_url.clone();
             let task = cx.background_executor().spawn(async move {
                 let mut workspace =
                     LocalWorkspace::open(database_path).map_err(|error| error.to_string())?;
-                let mut transport = HttpSyncTransport::new(&settings.server_base_url, &token)
+                let mut transport = HttpSyncTransport::new(&server_base_url, &token)
                     .map_err(|error| error.to_string())?;
-                let subscriptions = workspace
-                    .sync_subscriptions(&sync_code, &mut transport)
-                    .map_err(|error| error.to_string())?;
-                let notes = workspace
-                    .sync_notes(&sync_code, &mut transport)
-                    .map_err(|error| error.to_string())?;
-                let bookmarks = workspace
-                    .sync_bookmarks(&sync_code, &mut transport)
-                    .map_err(|error| error.to_string())?;
-                Ok::<_, String>((subscriptions, notes, bookmarks))
+                workspace
+                    .sync_all_domains(&sync_code, &mut transport)
+                    .map_err(|error| error.to_string())
             });
             self.sync_in_progress = true;
-            self.status = "正在同步关注、笔记与书签三个加密域……".into();
+            self.status = SYNC_IN_PROGRESS_STATUS.into();
             cx.spawn(async move |view, cx| {
                 let result = task.await;
                 cx.update(|cx| {
@@ -1627,15 +1530,9 @@ mod mobile {
                     view.update(cx, |this, cx| {
                         this.sync_in_progress = false;
                         match result {
-                            Ok((subscriptions, notes, bookmarks)) => {
+                            Ok(summary) => {
                                 this.refresh();
-                                this.status = format!(
-                                    "同步完成：关注 {}、笔记 {}、书签 {} 条；新增 {} 条",
-                                    subscriptions.total,
-                                    notes.total,
-                                    bookmarks.total,
-                                    subscriptions.added + notes.added + bookmarks.added
-                                );
+                                this.status = summary.status_line();
                             }
                             Err(error) => this.status = error,
                         }
@@ -1761,9 +1658,9 @@ mod mobile {
                 self.refresh_sync_secret_status();
             }
             if section == "应用" {
-                match self.secret_store.get(SecretKey::AgentCredential) {
-                    Ok(value) => self.agent_key_configured = value.is_some(),
-                    Err(error) => self.status = error.to_string(),
+                match credential_configured(&self.secret_store, CredentialKey::AgentCredential) {
+                    Ok(configured) => self.agent_key_configured = configured,
+                    Err(error) => self.status = error,
                 }
                 self.load_agent_activity(cx);
             }

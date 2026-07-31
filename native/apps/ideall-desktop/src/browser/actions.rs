@@ -109,7 +109,7 @@ impl IdeallDesktop {
         cx: &mut Context<Self>,
     ) {
         let fetch = cx.background_executor().spawn(async move {
-            ideall_webmeta::fetch_page_meta(&url).map(|meta| BookmarkMetadata {
+            crate::webmeta::fetch_page_meta(&url).map(|meta| BookmarkMetadata {
                 canonical_url: meta.canonical_url,
                 title: meta.title,
                 description: meta.description,
@@ -141,5 +141,86 @@ impl IdeallDesktop {
             });
         })
         .detach();
+    }
+
+    pub(crate) fn open_bookmark_external(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.editor.selected_id.clone() else {
+            return;
+        };
+        if self.editor.selected_kind != Some(NodeKind::Bookmark) {
+            return;
+        }
+
+        if self.editor.dirty {
+            let title = self.editor.title_input.read(cx).value().to_string();
+            let url = self.editor.body_input.read(cx).value().to_string();
+            if let Err(error) = self.service.save_edits(&id, title, Some(&url)) {
+                self.status = Some(error.to_string().into());
+                cx.notify();
+                return;
+            }
+            self.editor.dirty = false;
+            self.refresh_items();
+            self.load_node_into_editor(&id, window, cx);
+        }
+
+        match self.service.node(&id) {
+            Ok(Node::Bookmark { content, .. }) => {
+                cx.open_url(&content.url);
+                self.status = Some("已交给系统浏览器打开".into());
+            }
+            Ok(_) => self.status = Some("当前项目不是书签".into()),
+            Err(error) => self.status = Some(error.to_string().into()),
+        }
+        cx.notify();
+    }
+    pub(crate) fn open_portal(
+        &mut self,
+        engine_id: &'static str,
+        url: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.clear_selection(window, cx);
+        self.editor.active_engine_id = Some(engine_id.into());
+        self.navigate_browser_to(url, true, window, cx);
+    }
+    pub(crate) fn open_file_with_system(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.editor.selected_id.clone() else {
+            return;
+        };
+        let node = match self.service.node(&id) {
+            Ok(node @ Node::File { .. }) => node,
+            Ok(_) => {
+                self.status = Some("当前项目不是文件".into());
+                cx.notify();
+                return;
+            }
+            Err(error) => {
+                self.status = Some(error.to_string().into());
+                cx.notify();
+                return;
+            }
+        };
+        let name = std::path::Path::new(&node.base().title)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("ideall-export.bin");
+        let directory = self
+            .database_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("viewer-cache")
+            .join(&id);
+        let target = directory.join(name);
+        match self.service.export_file(&id, &target) {
+            Ok(size) => {
+                cx.open_with_system(&target);
+                self.status = Some(format!("已导出 {size} 字节临时副本并交给系统应用").into());
+            }
+            Err(error) => self.status = Some(error.to_string().into()),
+        }
+        cx.notify();
     }
 }

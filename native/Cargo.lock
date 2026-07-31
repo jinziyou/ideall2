@@ -4319,7 +4319,7 @@ dependencies = [
  "ideall-agent",
  "ideall-application",
  "ideall-storage",
- "ideall-sync-http",
+ "ideall-sync",
  "ideall-updater",
  "minisign",
 ]
@@ -4332,17 +4332,17 @@ dependencies = [
  "gpui 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "gpui-component",
  "ideall-acp",
+ "ideall-agent",
  "ideall-application",
  "ideall-domain",
  "ideall-presentation",
  "ideall-protocol",
  "ideall-secrets",
  "ideall-sync",
- "ideall-sync-http",
  "ideall-updater",
- "ideall-webmeta",
  "lb-wry",
  "unicode-segmentation",
+ "ureq",
  "url",
  "x11rb",
 ]
@@ -4363,13 +4363,13 @@ dependencies = [
  "android-activity",
  "android_logger",
  "gpui-mobile",
+ "ideall-agent",
  "ideall-application",
  "ideall-domain",
  "ideall-presentation",
  "ideall-protocol",
  "ideall-secrets",
  "ideall-sync",
- "ideall-sync-http",
  "jni 0.22.4",
  "log",
  "serde_json",
@@ -4433,16 +4433,6 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "thiserror 2.0.19",
-]
-
-[[package]]
-name = "ideall-sync-http"
-version = "0.2.0"
-dependencies = [
- "ideall-sync",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
  "ureq",
  "url",
 ]
@@ -4460,14 +4450,6 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.19",
- "ureq",
- "url",
-]
-
-[[package]]
-name = "ideall-webmeta"
-version = "0.2.0"
-dependencies = [
  "ureq",
  "url",
 ]

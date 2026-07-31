@@ -20,6 +20,6 @@ pub use note_rich_text::{
 };
 pub use workspace::{
     AgentDocumentContext, AgentModelSettings, AgentToolRun, AgentTranscriptMessage,
-    AgentTurnResult, ApplicationError, ExternalAcpSettings, HOME_ROOT_ID, LocalWorkspace,
-    NodeSummary, PlainNoteDocument, SyncSettings, TextFileDocument,
+    AgentTurnResult, ApplicationError, BookmarkMetadata, ExternalAcpSettings, HOME_ROOT_ID,
+    INBOX_ROOT_ID, LocalWorkspace, NodeSummary, PlainNoteDocument, SyncSettings, TextFileDocument,
 };

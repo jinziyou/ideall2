@@ -79,6 +79,8 @@ fn note_block_style_dropdown(
         .label(label)
         .tooltip("转换当前内容块")
         .small()
+        .h(px(28.0))
+        .rounded_full()
         .ghost()
         .disabled(selected_count > 1 || current.is_none())
         .dropdown_caret(true)
@@ -132,8 +134,13 @@ fn note_color_dropdown(
             "背景高亮"
         })
         .xsmall()
+        .h(px(28.0))
+        .rounded(px(6.0))
         .ghost()
         .selected(selected.is_some())
+        .when(selected.is_some(), |button| {
+            button.bg(rgb(ACCENT_SOFT)).text_color(rgb(ACCENT))
+        })
         .disabled(disabled)
         .dropdown_caret(true)
         .dropdown_menu(move |menu, _, _| {
@@ -601,23 +608,13 @@ impl IdeallDesktop {
                                         .flex()
                                         .items_start()
                                         .when(
-                                            matches!(kind, NoteEditorBlockKind::Quote),
-                                            |content| {
-                                                content
-                                                    .border_l_1()
-                                                    .border_color(rgb(INK_MUTED))
-                                                    .pl_3()
-                                            },
-                                        )
-                                        .when(
                                             is_code,
                                             |content| {
                                                 content
-                                                    .p_2()
+                                                    .p_3()
                                                     .rounded_md()
-                                                    .border_1()
-                                                    .border_color(rgb(BORDER))
                                                     .bg(rgb(SURFACE_MUTED))
+                                                    .font_family("monospace")
                                             },
                                         )
                                         .when(is_callout, |content| {
@@ -790,6 +787,12 @@ impl IdeallDesktop {
                                             )
                                         })
                                         .when(is_bookmark && !show_input, |content| {
+                                            let host = url::Url::parse(&value)
+                                                .ok()
+                                                .and_then(|parsed| {
+                                                    parsed.host_str().map(str::to_owned)
+                                                })
+                                                .unwrap_or_else(|| "网页书签".into());
                                             content
                                                 .child(
                                                     div()
@@ -801,7 +804,10 @@ impl IdeallDesktop {
                                                         .rounded_md()
                                                         .bg(rgb(ACCENT_SOFT))
                                                         .text_color(rgb(ACCENT))
-                                                        .child("↗"),
+                                                        .child(
+                                                            Icon::new(IconName::Globe)
+                                                                .size(px(15.0)),
+                                                        ),
                                                 )
                                                 .child(
                                                     div()
@@ -812,12 +818,15 @@ impl IdeallDesktop {
                                                         .gap(px(2.0))
                                                         .child(
                                                             div()
+                                                                .overflow_hidden()
+                                                                .text_ellipsis()
+                                                                .whitespace_nowrap()
                                                                 .text_sm()
                                                                 .font_weight(
                                                                     gpui::FontWeight::SEMIBOLD,
                                                                 )
                                                                 .text_color(rgb(INK))
-                                                                .child("网页书签"),
+                                                                .child(host),
                                                         )
                                                         .child(
                                                             div()
@@ -833,7 +842,8 @@ impl IdeallDesktop {
                                                     Button::new(SharedString::from(format!(
                                                         "note-bookmark-open-card-{id}"
                                                     )))
-                                                    .label("打开")
+                                                    .icon(IconName::ExternalLink)
+                                                    .tooltip("在系统浏览器中打开")
                                                     .xsmall()
                                                     .ghost()
                                                     .on_click(cx.listener(
@@ -975,6 +985,9 @@ impl IdeallDesktop {
                                                             NoteEditorBlockKind::Heading(_) => {
                                                                 px(17.0)
                                                             }
+                                                            NoteEditorBlockKind::Code { .. } => {
+                                                                px(13.0)
+                                                            }
                                                             _ => px(16.0),
                                                         })
                                                         .line_height(match kind {
@@ -986,6 +999,9 @@ impl IdeallDesktop {
                                                             }
                                                             NoteEditorBlockKind::Heading(3) => {
                                                                 px(30.0)
+                                                            }
+                                                            NoteEditorBlockKind::Code { .. } => {
+                                                                px(20.0)
                                                             }
                                                             _ => px(26.0),
                                                         })
@@ -1277,15 +1293,22 @@ impl IdeallDesktop {
                             Button::new(id)
                                 .label(label)
                                 .tooltip(tooltip)
-                                .xsmall()
+                                .w(px(28.0))
+                                .h(px(28.0))
+                                .p_0()
+                                .rounded(px(6.0))
                                 .ghost()
                                 .selected(selected)
+                                .when(selected, |button| {
+                                    button.bg(rgb(ACCENT_SOFT)).text_color(rgb(ACCENT))
+                                })
                                 .disabled(multiple_selected)
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.format_note_inline(style, window, cx);
                                 }))
                         }),
                     )
+                    .child(div().w(px(1.0)).h(px(20.0)).mx_1().bg(rgb(BORDER)))
                     .child(note_color_dropdown(
                         "note-inline-text-color",
                         true,
@@ -1306,7 +1329,10 @@ impl IdeallDesktop {
                             Button::new("note-todo-toggle")
                                 .label("✓")
                                 .tooltip("切换待办完成状态")
-                                .xsmall()
+                                .w(px(28.0))
+                                .h(px(28.0))
+                                .p_0()
+                                .rounded(px(6.0))
                                 .ghost()
                                 .disabled(multiple_selected)
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -1320,7 +1346,10 @@ impl IdeallDesktop {
                                 Button::new("note-indent-out")
                                     .label("←")
                                     .tooltip("减少列表层级")
-                                    .xsmall()
+                                    .w(px(28.0))
+                                    .h(px(28.0))
+                                    .p_0()
+                                    .rounded(px(6.0))
                                     .ghost()
                                     .disabled(multiple_selected)
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -1335,7 +1364,10 @@ impl IdeallDesktop {
                                 Button::new("note-indent-in")
                                     .label("→")
                                     .tooltip("增加列表层级")
-                                    .xsmall()
+                                    .w(px(28.0))
+                                    .h(px(28.0))
+                                    .p_0()
+                                    .rounded(px(6.0))
                                     .ghost()
                                     .disabled(multiple_selected)
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -1347,11 +1379,15 @@ impl IdeallDesktop {
                                     })),
                             )
                     })
+                    .child(div().w(px(1.0)).h(px(20.0)).mx_1().bg(rgb(BORDER)))
                     .child(
                         Button::new("note-block-more")
                             .label("•••")
                             .tooltip("更多块操作")
-                            .xsmall()
+                            .w(px(28.0))
+                            .h(px(28.0))
+                            .p_0()
+                            .rounded(px(6.0))
                             .ghost()
                             .dropdown_menu(|menu, _, _| {
                                 menu.label("块操作")

@@ -4340,6 +4340,7 @@ dependencies = [
  "ideall-sync",
  "ideall-sync-http",
  "ideall-updater",
+ "ideall-webmeta",
  "lb-wry",
  "unicode-segmentation",
  "url",
@@ -4459,6 +4460,14 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.19",
+ "ureq",
+ "url",
+]
+
+[[package]]
+name = "ideall-webmeta"
+version = "0.2.0"
+dependencies = [
  "ureq",
  "url",
 ]

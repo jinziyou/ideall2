@@ -57,8 +57,9 @@ native/apps/ideall-desktop/src/
 
 - 持有当前文档、草稿脏状态、自动保存版本和每文档光标会话。
 - 文件统一按文本显示，并根据扩展名选择轻量高亮；未知扩展名回退为纯文本。
-- 已有笔记默认进入 Markdown 阅读视图；新建空笔记直接进入原生块编辑，眼睛按钮在阅读与
-  同一份可逆 Plate/Markdown 投影之间切换。编辑状态下提供块类型、斜杠命令、行内格式、
+- 已有笔记默认进入 Markdown 阅读视图；新建空笔记直接进入原生块编辑，面包屑栏的
+  「阅读/编辑」分段胶囊在阅读与同一份可逆 Plate/Markdown 投影之间切换。编辑状态下提供
+  块类型、斜杠命令、行内格式、
   块重排/复制/删除、手柄菜单、页面提及、反向链接、待办和层级操作；格式栏收为单行，
   低频块类型与块操作进入下拉菜单，块手柄只在当前块或选中块显示。完整行为见
   [desktop-editor.md](desktop-editor.md)。
@@ -69,7 +70,9 @@ native/apps/ideall-desktop/src/
 ### Explorer
 
 - 持有可见树、选择、折叠集合、重命名输入和侧栏尺寸。
-- “私有页面”和“回收站”作为同级虚拟树根；节点行按 `parent_id` 与 `depth` 呈现层级。
+- “私有页面”“收集箱”“回收站”作为同级虚拟树根；节点行按 `parent_id` 与 `depth` 呈现
+  层级。收集箱是 application 惰性创建的固定 id 目录（`INBOX_ROOT_ID`），带未整理计数
+  徽标，其子树不在“私有页面”重复出现；整理即常规移动操作，不设第二套机制。
 - 根节点提供直接新建和更多菜单，文件夹节点的上下文菜单将新建与导入目标绑定到当前选择。
 - 树变更通过 `LocalWorkspace` 用例完成；组件不得直接访问 SQLite。
 - 布局状态使用稳定排序后写入 `WorkspaceState`。
@@ -82,6 +85,8 @@ native/apps/ideall-desktop/src/
   保存和行列状态栏；书签仍以 `FileRef + ideall.browser` 保持统一标签身份。
 - Surface 提供地址导航、前进/后退、刷新、外部打开和返回书签编辑 Engine；浏览历史仍只属于
   Browser 会话状态。
+- 工具条提供「存为书签」一键捕获：地址经归一校验后落入收集箱，零确认；捕获成功后由
+  `ideall-webmeta` 在后台静默补全标题、摘要、favicon 与 canonical URL，失败不影响捕获。
 - macOS/Windows 使用受限子 WebView；Linux 当前明确交给系统浏览器。
 - Browser 历史属于组件会话状态，不进入 Node 正文或 workspace 标签身份。
 

@@ -53,6 +53,14 @@ pub struct NodeProjection {
     pub deleted: bool,
 }
 
+/// 全文搜索命中：`snippet` 是 body 命中片段（含 «» 高亮标记），
+/// body 无命中时回退为 body 纯文本前缀。
+#[derive(Clone, Debug, PartialEq)]
+pub struct SearchHit {
+    pub node: Node,
+    pub snippet: String,
+}
+
 impl Database {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
         let connection = Connection::open(path)?;
@@ -483,32 +491,48 @@ impl Database {
         Ok(committed)
     }
 
-    pub fn search_nodes(&self, query: &str, limit: usize) -> Result<Vec<Node>, StorageError> {
+    pub fn search_nodes(
+        &self,
+        query: &str,
+        limit: usize,
+        kind: Option<NodeKind>,
+    ) -> Result<Vec<SearchHit>, StorageError> {
         let query = query.trim();
         if query.is_empty() {
             return Ok(Vec::new());
         }
         let limit = limit.clamp(1, 200);
+        let kind = kind.map(node_kind);
         let mut result = Vec::new();
         let mut seen = HashSet::new();
 
         if let Some(fts_query) = fts_literal_query(query) {
             let mut statement = self.connection.prepare(
-                "SELECT n.document_json
+                "SELECT n.document_json,
+                        snippet(node_search, 2, '«', '»', ' … ', 12),
+                        search.body
                  FROM node_search AS search
                  JOIN nodes AS n ON n.id = search.node_id
                  WHERE node_search MATCH ?1 AND n.deleted_at IS NULL
+                   AND (?3 IS NULL OR n.kind = ?3)
                  ORDER BY bm25(node_search), n.updated_at DESC, n.id
                  LIMIT ?2",
             )?;
-            let rows = statement.query_map(params![fts_query, limit as i64], |row| {
-                row.get::<_, String>(0)
+            let rows = statement.query_map(params![fts_query, limit as i64, kind], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
             })?;
             for row in rows {
-                let raw = row?;
+                let (raw, snippet, body) = row?;
                 let node: Node = serde_json::from_str(&raw)?;
                 seen.insert(node.base().id.clone());
-                result.push(node);
+                result.push(SearchHit {
+                    node,
+                    snippet: search_snippet(&snippet, &body),
+                });
             }
         }
 
@@ -516,25 +540,29 @@ impl Database {
             let pattern = format!("%{}%", escape_like_pattern(query));
             let remaining = limit - result.len();
             let mut statement = self.connection.prepare(
-                "SELECT n.document_json
+                "SELECT n.document_json, search.body
                  FROM node_search AS search
                  JOIN nodes AS n ON n.id = search.node_id
                  WHERE n.deleted_at IS NULL
+                   AND (?3 IS NULL OR n.kind = ?3)
                    AND (search.title LIKE ?1 ESCAPE '\\' COLLATE NOCASE
                      OR search.body LIKE ?1 ESCAPE '\\' COLLATE NOCASE
                      OR search.tags LIKE ?1 ESCAPE '\\' COLLATE NOCASE)
                  ORDER BY n.updated_at DESC, n.id
                  LIMIT ?2",
             )?;
-            let rows = statement
-                .query_map(params![pattern, (remaining + seen.len()) as i64], |row| {
-                    row.get::<_, String>(0)
-                })?;
+            let rows = statement.query_map(
+                params![pattern, (remaining + seen.len()) as i64, kind],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )?;
             for row in rows {
-                let raw = row?;
+                let (raw, body) = row?;
                 let node: Node = serde_json::from_str(&raw)?;
                 if seen.insert(node.base().id.clone()) {
-                    result.push(node);
+                    result.push(SearchHit {
+                        node,
+                        snippet: body_prefix(&body),
+                    });
                     if result.len() == limit {
                         break;
                     }
@@ -1148,6 +1176,26 @@ fn insert_plugin(
     Ok(())
 }
 
+/// FTS snippet 在 body 列无命中时返回列首若干 token（无标记）；
+/// 只有出现 « 标记才算 body 命中，否则回退为 body 纯文本前缀。
+fn search_snippet(snippet: &str, body: &str) -> String {
+    if snippet.contains('«') {
+        snippet.to_owned()
+    } else {
+        body_prefix(body)
+    }
+}
+
+/// body 纯文本前缀：折叠空白后取前 120 个字符（截断在字符边界）。
+fn body_prefix(body: &str) -> String {
+    body.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(120)
+        .collect()
+}
+
 fn node_kind(kind: NodeKind) -> &'static str {
     match kind {
         NodeKind::Folder => "folder",
@@ -1184,7 +1232,7 @@ fn count(connection: &Connection, table: &str) -> Result<u64, StorageError> {
 mod tests {
     use std::collections::BTreeMap;
 
-    use ideall_protocol::{BaseNode, Node};
+    use ideall_protocol::{BaseNode, BookmarkContent, Node};
 
     use super::*;
     use crate::{ArchiveLimits, parse_workspace_archive};
@@ -1328,23 +1376,97 @@ mod tests {
     fn full_text_index_tracks_updates_trash_restore_and_purge() {
         let mut database = Database::open_in_memory().unwrap();
         database.replace_from_archive(&archive()).unwrap();
-        assert_eq!(database.search_nodes("body", 20).unwrap().len(), 1);
+        assert_eq!(database.search_nodes("body", 20, None).unwrap().len(), 1);
 
         let mut node = database.get_node("n1").unwrap().unwrap();
         node.base_mut().title = "中文知识库".into();
         database.put_node(&node).unwrap();
-        assert_eq!(database.search_nodes("知识", 20).unwrap().len(), 1);
-        assert!(database.search_nodes("100%", 20).unwrap().is_empty());
+        assert_eq!(database.search_nodes("知识", 20, None).unwrap().len(), 1);
+        assert!(database.search_nodes("100%", 20, None).unwrap().is_empty());
         for punctuation in ["\"", "*", "%", "' OR 1=1 --"] {
-            assert!(database.search_nodes(punctuation, 20).unwrap().is_empty());
+            assert!(
+                database
+                    .search_nodes(punctuation, 20, None)
+                    .unwrap()
+                    .is_empty()
+            );
         }
 
         database.move_to_trash("n1", 10).unwrap();
-        assert!(database.search_nodes("知识", 20).unwrap().is_empty());
+        assert!(database.search_nodes("知识", 20, None).unwrap().is_empty());
         database.restore_from_trash("n1", 11).unwrap();
-        assert_eq!(database.search_nodes("知识", 20).unwrap().len(), 1);
+        assert_eq!(database.search_nodes("知识", 20, None).unwrap().len(), 1);
         database.remove_node_permanently("n1").unwrap();
-        assert!(database.search_nodes("知识", 20).unwrap().is_empty());
+        assert!(database.search_nodes("知识", 20, None).unwrap().is_empty());
+    }
+
+    fn bookmark(id: &str, updated_at: i64, title: &str, description: &str) -> Node {
+        Node::Bookmark {
+            base: BaseNode {
+                id: id.into(),
+                parent_id: None,
+                sort_key: id.into(),
+                title: title.into(),
+                tags: Vec::new(),
+                created_at: 1,
+                updated_at,
+                deleted_at: None,
+                meta: BTreeMap::new(),
+            },
+            content: BookmarkContent {
+                url: "https://example.com/".into(),
+                description: description.into(),
+                favicon: String::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn search_marks_body_hits_falls_back_for_title_hits_and_filters_kind() {
+        let mut database = Database::open_in_memory().unwrap();
+        // body 命中：中文前缀与英文混排各一条。
+        database
+            .put_node(&note("cn-note", 2, "流水线作业可以提升发布效率"))
+            .unwrap();
+        database
+            .put_node(&note("mixed-note", 3, "deploy 流水线 faster"))
+            .unwrap();
+        // 仅 title 命中：body（url + 空描述）不含查询词。
+        database
+            .put_node(&bookmark("title-only-bookmark", 4, "流水线书签", ""))
+            .unwrap();
+
+        let hits = database.search_nodes("流水线", 20, None).unwrap();
+        assert_eq!(hits.len(), 3);
+        let snippets: BTreeMap<_, _> = hits
+            .iter()
+            .map(|hit| (hit.node.base().id.as_str(), hit.snippet.as_str()))
+            .collect();
+
+        let chinese = snippets["cn-note"];
+        assert!(chinese.contains('«') && chinese.contains('»') && chinese.contains("流水线"));
+        assert!(snippets["mixed-note"].contains("«流水线»"));
+        // title-only 命中回退为 body 纯文本前缀，无高亮标记。
+        assert_eq!(snippets["title-only-bookmark"], "https://example.com/");
+
+        let notes = database
+            .search_nodes("流水线", 20, Some(NodeKind::Note))
+            .unwrap();
+        assert_eq!(notes.len(), 2);
+        assert!(notes.iter().all(|hit| hit.node.kind() == NodeKind::Note));
+
+        let bookmarks = database
+            .search_nodes("流水线", 20, Some(NodeKind::Bookmark))
+            .unwrap();
+        assert_eq!(bookmarks.len(), 1);
+        assert_eq!(bookmarks[0].node.base().id, "title-only-bookmark");
+
+        assert!(
+            database
+                .search_nodes("不存在的词汇", 20, None)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1377,7 +1499,12 @@ mod tests {
             .unwrap();
         assert_eq!(committed, vec![updated.clone()]);
         assert_eq!(
-            database.search_nodes("new body", 20).unwrap(),
+            database
+                .search_nodes("new body", 20, None)
+                .unwrap()
+                .into_iter()
+                .map(|hit| hit.node)
+                .collect::<Vec<_>>(),
             vec![updated]
         );
 
@@ -1406,11 +1533,16 @@ mod tests {
                 |node| node.kind() == NodeKind::Note,
             )
             .unwrap();
-        assert!(database.search_nodes("recover", 20).unwrap().is_empty());
+        assert!(
+            database
+                .search_nodes("recover", 20, None)
+                .unwrap()
+                .is_empty()
+        );
         assert!(database.restore_from_trash("sync-delete", 11).unwrap());
         let restored = database.get_node("sync-delete").unwrap().unwrap();
         assert_eq!(restored.base().deleted_at, None);
-        assert_eq!(database.search_nodes("recover", 20).unwrap().len(), 1);
+        assert_eq!(database.search_nodes("recover", 20, None).unwrap().len(), 1);
     }
 
     #[test]

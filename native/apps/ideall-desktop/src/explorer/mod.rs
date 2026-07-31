@@ -201,6 +201,7 @@ mod tests {
             updated_at: 0,
             deleted: false,
             depth,
+            snippet: String::new(),
         }
     }
 

@@ -28,10 +28,11 @@ use gpui_component::{
 use ideall_acp::{AcpToolStatus, ExternalAcpConfig, command_exists, run_external_acp};
 use ideall_application::{
     AgentAuditRecord, AgentDocumentContext, AgentModelSettings, AgentToolRun,
-    AgentTranscriptMessage, AuditStatus, ExternalAcpSettings, HOME_ROOT_ID, LocalWorkspace,
-    ModelRole, NodeSummary, NoteBlockIndent, NoteBlockMove, NoteBlockStyle, NoteColor,
-    NoteInlineStyle, NoteSlashCommand, OpenAiCompatibleClient, SyncSettings, note_mention_query,
-    note_node_id_from_url, note_node_url, note_slash_commands, note_slash_query,
+    AgentTranscriptMessage, AuditStatus, BookmarkMetadata, ExternalAcpSettings, HOME_ROOT_ID,
+    INBOX_ROOT_ID, LocalWorkspace, ModelRole, NodeSummary, NoteBlockIndent, NoteBlockMove,
+    NoteBlockStyle, NoteColor, NoteInlineStyle, NoteSlashCommand, OpenAiCompatibleClient,
+    SyncSettings, note_mention_query, note_node_id_from_url, note_node_url, note_slash_commands,
+    note_slash_query,
 };
 use ideall_domain::{
     EnginePlatform, EnginePreferences, EngineRuntimeKind, ExplorerLayoutState, TabDescriptor,
@@ -126,7 +127,9 @@ struct IdeallDesktop {
     browser: BrowserWorkspace,
     active_section: SharedString,
     show_trash: bool,
+    inbox_count: usize,
     search_query: String,
+    search_kind: Option<NodeKind>,
     mentionable_notes: Vec<NodeSummary>,
     note_backlinks: Vec<NodeSummary>,
     search_requests: LatestRequest,
@@ -170,8 +173,7 @@ impl IdeallDesktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let search_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("搜索标题与正文（Ctrl/⌘ K）"));
+        let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("搜索标题与正文"));
         let feed_key_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("发布者域名，例如 example.com"));
         let browser_address_input =
@@ -397,7 +399,9 @@ impl IdeallDesktop {
             browser,
             active_section: "我的".into(),
             show_trash: false,
+            inbox_count: 0,
             search_query: String::new(),
+            search_kind: None,
             mentionable_notes,
             note_backlinks: Vec::new(),
             search_requests: LatestRequest::default(),
@@ -468,6 +472,9 @@ impl IdeallDesktop {
             this.editor.restore_active_session(window, cx);
         }
         this.load_agent_activity(cx);
+        // 启动即按当前分区应用过滤并刷新收集箱计数，
+        // 避免首帧展示未过滤的初始列表（收集箱重复出现、虚拟根计数为 0）。
+        this.refresh_items();
         this
     }
 
@@ -478,22 +485,50 @@ impl IdeallDesktop {
                 .filter(|item| item.kind == NodeKind::Note && !item.deleted)
                 .collect();
         }
+        self.inbox_count = self
+            .service
+            .list_children(INBOX_ROOT_ID)
+            .map(|children| children.len())
+            .unwrap_or(0);
         let result = if self.show_trash {
             self.service.list_trash()
+        } else if self.active_section.as_ref() == "收集箱" {
+            self.service.list_children(INBOX_ROOT_ID)
         } else if !self.search_query.trim().is_empty() {
-            self.service.search(&self.search_query, 200)
+            self.service
+                .search_with_kind(&self.search_query, 200, self.search_kind)
         } else {
             self.service.list_home().map(|mut items| {
                 match self.active_section.as_ref() {
-                    "活动" => items.sort_by(|left, right| {
-                        right
-                            .updated_at
-                            .cmp(&left.updated_at)
-                            .then_with(|| left.id.cmp(&right.id))
-                    }),
+                    "活动" => {
+                        // 最近更新只呈现内容项，目录容器不进入时间线。
+                        items.retain(|item| item.kind != NodeKind::Folder);
+                        items.sort_by(|left, right| {
+                            right
+                                .updated_at
+                                .cmp(&left.updated_at)
+                                .then_with(|| left.id.cmp(&right.id))
+                        });
+                    }
                     "浏览" => items
                         .retain(|item| matches!(item.kind, NodeKind::Bookmark | NodeKind::Feed)),
                     "应用" | "设置" => items.clear(),
+                    "我的" => {
+                        // 收集箱通过虚拟根进入，不在「我的」树中重复出现。
+                        let mut hidden =
+                            std::collections::HashSet::from([INBOX_ROOT_ID.to_owned()]);
+                        items.retain(|item| {
+                            let hide = hidden.contains(item.id.as_str())
+                                || item
+                                    .parent_id
+                                    .as_deref()
+                                    .is_some_and(|parent| hidden.contains(parent));
+                            if hide {
+                                hidden.insert(item.id.clone());
+                            }
+                            !hide
+                        });
+                    }
                     _ => {}
                 }
                 items
@@ -522,6 +557,7 @@ impl IdeallDesktop {
         self.active_section = "搜索".into();
         self.status = Some("正在搜索本地内容…".into());
         let database_path = self.database_path.clone();
+        let search_kind = self.search_kind;
         let timer = cx.background_executor().timer(SEARCH_DEBOUNCE_DELAY);
         self.search_task = Some(cx.spawn(async move |view, cx| {
             timer.await;
@@ -530,7 +566,7 @@ impl IdeallDesktop {
                 let workspace =
                     LocalWorkspace::open(database_path).map_err(|error| error.to_string())?;
                 workspace
-                    .search(&query_for_search, 200)
+                    .search_with_kind(&query_for_search, 200, search_kind)
                     .map_err(|error| error.to_string())
             });
             let result = search.await;
@@ -559,6 +595,17 @@ impl IdeallDesktop {
             });
         }));
         cx.notify();
+    }
+
+    /// 切换搜索类型过滤并立即用当前查询重发搜索（复用同一防抖）。
+    fn set_search_kind(&mut self, kind: Option<NodeKind>, cx: &mut Context<Self>) {
+        self.search_kind = kind;
+        if !self.search_query.trim().is_empty() {
+            let query = self.search_query.clone();
+            self.schedule_search(query, cx);
+        } else {
+            cx.notify();
+        }
     }
 
     fn create_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -606,7 +653,18 @@ impl IdeallDesktop {
     }
 
     fn create_bookmark(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let parent = self.creation_parent();
+        let parent = match self.creation_parent() {
+            Some(parent) => Some(parent),
+            // 未选中目录时书签先落入收集箱，不再直接挂到首页。
+            None => match self.service.ensure_inbox() {
+                Ok(inbox) => Some(inbox),
+                Err(error) => {
+                    self.status = Some(error.to_string().into());
+                    cx.notify();
+                    return;
+                }
+            },
+        };
         match self
             .service
             .create_bookmark(parent.as_deref(), "新建书签", "https://example.com/")
@@ -906,9 +964,12 @@ impl IdeallDesktop {
                 if let Node::Bookmark { content, .. } = node {
                     self.editor.suppress_events = true;
                     self.editor.body_input.update(cx, |input, cx| {
-                        input.set_value(content.url, window, cx);
+                        input.set_value(content.url.clone(), window, cx);
                     });
                     self.editor.suppress_events = false;
+                    // 手动编辑保存的书签同样后台补全元数据；apply 只替换占位标题，
+                    // 用户改过的标题不会被覆盖，抓取失败完全静默。
+                    self.fetch_bookmark_metadata(draft.id.clone(), content.url.clone(), cx);
                 }
                 if self.editor.selected_kind == Some(NodeKind::File) {
                     let language = text_highlight_for_node(&self.service, &draft.id);
@@ -1984,6 +2045,27 @@ impl IdeallDesktop {
         cx.notify();
     }
 
+    fn show_inbox(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.service.ensure_inbox() {
+            Ok(_) => {
+                self.show_trash = false;
+                self.search_query.clear();
+                self.search_requests.invalidate();
+                drop(self.search_task.take());
+                self.suppress_search_events = true;
+                self.search_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                self.suppress_search_events = false;
+                self.active_section = "收集箱".into();
+                self.explorer.clear_selection();
+                self.clear_selection(window, cx);
+                self.refresh_items();
+            }
+            Err(error) => self.status = Some(error.to_string().into()),
+        }
+        cx.notify();
+    }
+
     fn clear_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.detach_pending_autosave(cx);
         self.editor.clear(window, cx);
@@ -2489,7 +2571,7 @@ fn configure_desktop_theme(cx: &mut App) {
     theme.secondary_foreground = rgb(INK).into();
     theme.border = rgb(BORDER).into();
     theme.input = rgb(BORDER_STRONG).into();
-    theme.radius = px(7.0);
+    theme.radius = px(8.0);
     theme.radius_lg = px(10.0);
     theme.shadow = false;
 }

@@ -26,72 +26,111 @@ impl IdeallDesktop {
             .bg(rgb(SURFACE))
             .child(
                 div()
+                    .w(px(300.0))
                     .flex()
-                    .items_baseline()
+                    .items_center()
                     .gap_2()
                     .child(
+                        Button::new("toggle-project-panel")
+                            .w(px(30.0))
+                            .h(px(30.0))
+                            .p_0()
+                            .icon(IconName::PanelLeft)
+                            .small()
+                            .ghost()
+                            .tooltip("显示或隐藏资料库 · Alt 1")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.toggle_project_panel(cx);
+                            })),
+                    )
+                    .child(
                         div()
-                            .text_sm()
+                            .text_base()
                             .text_color(rgb(INK))
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .child("ideall"),
                     )
                     .child(
                         div()
-                            .text_size(px(9.0))
+                            .pl_2()
+                            .border_l_1()
+                            .border_color(rgb(BORDER))
+                            .text_size(px(10.0))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
                             .text_color(rgb(INK_FAINT))
                             .child("LOCAL WORKSPACE"),
                     ),
             )
-            .child(div().flex_1())
             .child(
-                Button::new("toggle-project-panel")
-                    .w(px(30.0))
-                    .h(px(30.0))
-                    .p_0()
-                    .icon(IconName::PanelLeft)
-                    .small()
-                    .ghost()
-                    .tooltip("显示或隐藏资料库 · Alt 1")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.toggle_project_panel(cx);
-                    })),
-            )
-            .child(
-                Button::new("focus-library-search")
-                    .w(px(30.0))
-                    .h(px(30.0))
-                    .p_0()
-                    .icon(IconName::Search)
-                    .small()
-                    .ghost()
-                    .tooltip("搜索全部内容 · Ctrl/⌘ K")
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        if !this.explorer.panel_visible {
-                            this.explorer.panel_visible = true;
-                            this.persist_workspace();
-                        }
-                        this.search_input
-                            .update(cx, |input, cx| input.focus(window, cx));
-                        cx.notify();
-                    })),
+                div().flex_1().flex().justify_center().child(
+                    div()
+                        .id("global-search-pill")
+                        .w(px(340.0))
+                        .h(px(32.0))
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .px_3()
+                        .rounded_full()
+                        .border_1()
+                        .border_color(rgb(BORDER))
+                        .bg(rgb(SURFACE_MUTED))
+                        .cursor_pointer()
+                        .hover(|pill| pill.border_color(rgb(BORDER_STRONG)))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            if !this.explorer.panel_visible {
+                                this.explorer.panel_visible = true;
+                                this.persist_workspace();
+                            }
+                            this.search_input
+                                .update(cx, |input, cx| input.focus(window, cx));
+                            cx.notify();
+                        }))
+                        .child(
+                            Icon::new(IconName::Search)
+                                .size(px(14.0))
+                                .text_color(rgb(INK_FAINT)),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_sm()
+                                .text_color(rgb(INK_FAINT))
+                                .child("搜索全部内容"),
+                        )
+                        .child(
+                            div()
+                                .px(px(6.0))
+                                .py(px(1.0))
+                                .rounded(px(5.0))
+                                .border_1()
+                                .border_color(rgb(BORDER))
+                                .bg(rgb(SURFACE))
+                                .text_size(px(11.0))
+                                .text_color(rgb(INK_FAINT))
+                                .child("⌘ K"),
+                        ),
+                ),
             )
             .child(
                 div()
+                    .w(px(300.0))
                     .flex()
                     .items_center()
+                    .justify_end()
                     .gap_2()
-                    .px_2()
-                    .max_w(px(280.0))
                     .overflow_hidden()
-                    .text_xs()
-                    .text_color(rgb(INK_MUTED))
-                    .child(div().w(px(6.0)).h(px(6.0)).rounded_full().bg(rgb(ACCENT)))
+                    .child(div().w(px(8.0)).h(px(8.0)).rounded_full().bg(rgb(ACCENT)))
                     .child(
                         div()
+                            .max_w(px(220.0))
                             .overflow_hidden()
                             .text_ellipsis()
                             .whitespace_nowrap()
+                            .text_xs()
+                            .text_color(rgb(INK_MUTED))
                             .child(local_status),
                     ),
             )
@@ -105,7 +144,8 @@ impl IdeallDesktop {
     ) -> gpui::AnyElement {
         let section = navigation.section;
         let selected = self.active_section.as_ref() == section
-            || (section == "我的" && matches!(self.active_section.as_ref(), "搜索" | "回收站"));
+            || (section == "我的"
+                && matches!(self.active_section.as_ref(), "搜索" | "回收站" | "收集箱"));
         let icon = match section {
             "我的" => IconName::LayoutDashboard,
             "活动" => IconName::Calendar,
@@ -125,7 +165,7 @@ impl IdeallDesktop {
             .h(px(36.0))
             .p_0()
             .border_0()
-            .rounded_md()
+            .rounded_lg()
             .ghost()
             .tooltip(tooltip)
             .cursor_pointer()
@@ -150,9 +190,9 @@ impl IdeallDesktop {
                             div()
                                 .absolute()
                                 .left(px(-10.0))
-                                .top(px(9.0))
+                                .top(px(7.0))
                                 .w(px(2.0))
-                                .h(px(18.0))
+                                .h(px(22.0))
                                 .rounded_full()
                                 .bg(rgb(ACCENT_ON_RAIL)),
                         )
@@ -181,9 +221,7 @@ impl IdeallDesktop {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(rgb(BORDER))
+                    .rounded(px(10.0))
                     .bg(rgb(ACCENT_SOFT))
                     .child(
                         Icon::new(IdeallIcon::Brand)
@@ -240,11 +278,15 @@ impl IdeallDesktop {
         let can_create = !self.show_trash && self.active_section.as_ref() == "我的";
         let show_browse = self.active_section.as_ref() == "浏览";
         let show_context = !matches!(self.active_section.as_ref(), "应用" | "设置");
-        let show_private_root = self.active_section.as_ref() == "回收站";
+        let show_private_root = matches!(self.active_section.as_ref(), "回收站" | "收集箱");
+        let show_inbox_root = matches!(self.active_section.as_ref(), "我的" | "收集箱");
+        let inbox_selected = self.active_section.as_ref() == "收集箱";
+        let inbox_count = self.inbox_count;
         let show_trash_root = self.active_section.as_ref() == "我的";
         let empty_message: SharedString = match self.active_section.as_ref() {
             "搜索" => "未找到匹配的本地内容".into(),
             "回收站" => "回收站为空".into(),
+            "收集箱" => "还没有未整理的内容，捕获的书签会先进这里".into(),
             "活动" => "还没有最近修改的内容".into(),
             "浏览" => "还没有书签或关注源".into(),
             "应用" => "在编辑区配置模型、ACP 与 Engine".into(),
@@ -257,15 +299,8 @@ impl IdeallDesktop {
             "浏览" => "关注与书签",
             "搜索" => "搜索结果",
             "回收站" => "回收站",
+            "收集箱" => "收集箱",
             section => section,
-        };
-        let section_icon = match self.active_section.as_ref() {
-            "我的" => IconName::FolderOpen,
-            "活动" => IconName::Calendar,
-            "浏览" => IconName::Globe,
-            "搜索" => IconName::Search,
-            "回收站" => IconName::Delete,
-            _ => IconName::FolderOpen,
         };
 
         div()
@@ -287,7 +322,7 @@ impl IdeallDesktop {
                     .child(
                         div()
                             .flex_1()
-                            .text_base()
+                            .text_sm()
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .text_color(rgb(INK))
                             .child("资料库"),
@@ -465,14 +500,14 @@ impl IdeallDesktop {
                         .child(
                             div()
                                 .id("tree-root-active")
-                                .h(px(32.0))
+                                .h(px(28.0))
                                 .flex()
                                 .items_center()
-                                .gap_2()
                                 .px_2()
                                 .rounded_md()
-                                .text_sm()
-                                .text_color(rgb(INK_MUTED))
+                                .text_size(px(11.0))
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .text_color(rgb(INK_FAINT))
                                 .when(can_create, |row| {
                                     row.drag_over::<DraggedNode>(|style, _, _, _| {
                                         style.bg(rgb(SELECTION))
@@ -483,16 +518,6 @@ impl IdeallDesktop {
                                         },
                                     ))
                                 })
-                                .child(
-                                    Icon::new(IconName::ChevronDown)
-                                        .size(px(14.0))
-                                        .text_color(rgb(INK_FAINT)),
-                                )
-                                .child(
-                                    Icon::new(section_icon).size(px(16.0)).text_color(rgb(
-                                        if can_create { INK_MUTED } else { ACCENT },
-                                    )),
-                                )
                                 .child(
                                     div()
                                         .flex_1()
@@ -541,9 +566,18 @@ impl IdeallDesktop {
                             let click_id = id.clone();
                             let context_id = id.clone();
                             let folder_id = id.clone();
+                            let icon_color = if selected {
+                                ACCENT
+                            } else {
+                                match item.kind {
+                                    NodeKind::Bookmark => ACCENT,
+                                    NodeKind::Feed => 0xd39a27,
+                                    _ => INK_MUTED,
+                                }
+                            };
                             div()
                                 .id(SharedString::from(format!("node-{id}")))
-                                .h(px(30.0))
+                                .h(px(28.0))
                                 .flex()
                                 .items_center()
                                 .gap_1()
@@ -618,11 +652,7 @@ impl IdeallDesktop {
                                         .child(
                                             Icon::new(node_kind_icon(item.kind, expanded))
                                                 .size(px(15.0))
-                                                .text_color(rgb(if selected {
-                                                    ACCENT
-                                                } else {
-                                                    INK_MUTED
-                                                })),
+                                                .text_color(rgb(icon_color)),
                                         ),
                                 )
                                 .when(renaming, |row| {
@@ -706,6 +736,58 @@ impl IdeallDesktop {
                                         )
                                 })
                         }))
+                        .when(show_inbox_root, |list| {
+                            list.child(
+                                div()
+                                    .id("tree-root-inbox")
+                                    .h(px(28.0))
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .px_2()
+                                    .mt_1()
+                                    .rounded_md()
+                                    .cursor_pointer()
+                                    .text_sm()
+                                    .text_color(rgb(INK_MUTED))
+                                    .drag_over::<DraggedNode>(|style, _, _, _| {
+                                        style.bg(rgb(ACCENT_SOFT))
+                                    })
+                                    .on_drop(cx.listener(|this, node: &DraggedNode, _, cx| {
+                                        this.move_explorer_node(
+                                            node.id.clone(),
+                                            Some(INBOX_ROOT_ID.to_owned()),
+                                            cx,
+                                        );
+                                    }))
+                                    .when(inbox_selected, |row| {
+                                        row.bg(rgb(SELECTION)).text_color(rgb(INK))
+                                    })
+                                    .hover(|row| row.bg(rgb(HOVER)))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.show_inbox(window, cx);
+                                    }))
+                                    .child(
+                                        Icon::new(IconName::Inbox)
+                                            .size(px(16.0))
+                                            .text_color(rgb(INK_FAINT)),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .overflow_hidden()
+                                            .text_ellipsis()
+                                            .whitespace_nowrap()
+                                            .child("收集箱"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(rgb(INK_FAINT))
+                                            .child(inbox_count.to_string()),
+                                    ),
+                            )
+                        })
                         .when(show_trash_root, |list| {
                             list.child(
                                 div()
@@ -762,10 +844,9 @@ impl IdeallDesktop {
             .h_full()
             .flex()
             .flex_none()
-            .items_center()
+            .items_end()
             .gap_1()
             .px_2()
-            .py_1()
             .children(tabs.into_iter().map(|tab| {
                 let id = tab_key(&tab);
                 let close_id = id.clone();
@@ -774,28 +855,33 @@ impl IdeallDesktop {
                 div()
                     .id(SharedString::from(format!("tab-{id}")))
                     .relative()
-                    .h(px(30.0))
+                    .h(px(33.0))
                     .min_w(px(132.0))
                     .max_w(px(208.0))
                     .flex()
                     .items_center()
                     .gap_2()
                     .px_3()
-                    .rounded_md()
+                    .rounded_t(px(8.0))
                     .border_1()
                     .border_color(rgb(if selected { BORDER } else { SURFACE_MUTED }))
                     .cursor_pointer()
                     .text_sm()
                     .text_color(rgb(if selected { INK } else { INK_MUTED }))
-                    .when(selected, |item| item.bg(rgb(SURFACE)))
-                    .hover(|item| item.bg(rgb(HOVER)))
+                    .when(selected, |item| {
+                        item.h(px(34.0))
+                            .mb(px(-1.0))
+                            .bg(rgb(SURFACE))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                    })
+                    .when(!selected, |item| item.hover(|item| item.bg(rgb(HOVER))))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.activate_tab(id.clone(), window, cx);
                     }))
                     .child(
                         Icon::new(engine_icon(&tab.engine_id))
                             .size(px(14.0))
-                            .text_color(rgb(if selected { ACCENT } else { INK_MUTED })),
+                            .text_color(rgb(if selected { ACCENT } else { INK_FAINT })),
                     )
                     .child(
                         div()
@@ -817,6 +903,18 @@ impl IdeallDesktop {
                                 this.close_tab(close_id.clone(), window, cx);
                             })),
                     )
+                    .when(selected, |item| {
+                        item.child(
+                            div()
+                                .absolute()
+                                .left(px(10.0))
+                                .right(px(10.0))
+                                .bottom(px(0.0))
+                                .h(px(2.0))
+                                .rounded_full()
+                                .bg(rgb(ACCENT)),
+                        )
+                    })
             }))
             .child(div().min_w(px(24.0)).flex_1());
 
@@ -854,6 +952,7 @@ impl IdeallDesktop {
         let transcript_start = self.agent_transcript.len().saturating_sub(24);
         let transcript = self.agent_transcript[transcript_start..].to_vec();
         let latest_audit = self.agent_audits.first().cloned();
+        let audit_count = self.agent_audits.len();
         let suggestions = if has_document_context {
             vec![
                 ("总结当前文档", "请总结当前文档，并提炼三个关键结论。", true),
@@ -880,7 +979,7 @@ impl IdeallDesktop {
             .flex_col()
             .border_l_1()
             .border_color(rgb(BORDER))
-            .bg(rgb(SURFACE))
+            .bg(rgb(SURFACE_MUTED))
             .child(
                 div()
                     .h(px(44.0))
@@ -890,7 +989,7 @@ impl IdeallDesktop {
                     .px_3()
                     .border_b_1()
                     .border_color(rgb(BORDER))
-                    .bg(rgb(SURFACE))
+                    .bg(rgb(SURFACE_MUTED))
                     .child(
                         div()
                             .text_sm()
@@ -964,17 +1063,17 @@ impl IdeallDesktop {
                     .items_center()
                     .gap_2()
                     .px_3()
-                    .rounded_md()
+                    .rounded_full()
                     .border_1()
                     .border_color(rgb(if self.agent_context_attached {
-                        ACCENT
+                        ACCENT_SOFT
                     } else {
                         BORDER
                     }))
                     .bg(rgb(if self.agent_context_attached {
                         ACCENT_SOFT
                     } else {
-                        SURFACE
+                        SURFACE_MUTED
                     }))
                     .when(has_document_context, |context| {
                         context
@@ -988,7 +1087,7 @@ impl IdeallDesktop {
                         if self.agent_context_attached {
                             ACCENT
                         } else {
-                            INK_MUTED
+                            INK_FAINT
                         },
                     )))
                     .child(
@@ -998,7 +1097,11 @@ impl IdeallDesktop {
                             .text_ellipsis()
                             .whitespace_nowrap()
                             .text_xs()
-                            .text_color(rgb(INK))
+                            .text_color(rgb(if self.agent_context_attached {
+                                ACCENT
+                            } else {
+                                INK
+                            }))
                             .child(context_title),
                     )
                     .child(
@@ -1110,11 +1213,11 @@ impl IdeallDesktop {
                         )
                     })
                     .children(transcript.into_iter().enumerate().map(|(index, message)| {
-                        let is_user = message.role == ModelRole::User;
                         let is_assistant = message.role == ModelRole::Assistant;
+                        let is_tool = message.role == ModelRole::Tool;
                         let background = match message.role {
-                            ModelRole::User => ACCENT_SOFT,
-                            ModelRole::Assistant => SURFACE,
+                            ModelRole::User => SURFACE,
+                            ModelRole::Assistant => SURFACE_MUTED,
                             ModelRole::Tool => MESSAGE_TOOL,
                             ModelRole::System => WARNING_SOFT,
                         };
@@ -1134,14 +1237,29 @@ impl IdeallDesktop {
                             .flex_col()
                             .gap_1()
                             .p_3()
-                            .rounded_md()
+                            .when(is_tool, |message| message.rounded_lg())
+                            .when(!is_tool, |message| message.rounded_xl())
                             .border_1()
-                            .border_color(rgb(if is_user { ACCENT_SOFT } else { BORDER }))
+                            .border_color(rgb(match message.role {
+                                ModelRole::User | ModelRole::System => BORDER,
+                                ModelRole::Assistant => SURFACE_MUTED,
+                                ModelRole::Tool => MESSAGE_TOOL,
+                            }))
                             .bg(rgb(background))
                             .child(
                                 div()
-                                    .text_xs()
-                                    .text_color(rgb(if is_user { ACCENT } else { INK_FAINT }))
+                                    .flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .text_size(px(11.0))
+                                    .text_color(rgb(INK_FAINT))
+                                    .when(is_tool, |label| {
+                                        label.child(
+                                            Icon::new(IdeallIcon::Wrench)
+                                                .size(px(11.0))
+                                                .text_color(rgb(INK_MUTED)),
+                                        )
+                                    })
                                     .child(agent_role_label(message.role)),
                             )
                             .when_some(markdown, |message, markdown| {
@@ -1152,38 +1270,58 @@ impl IdeallDesktop {
                             })
                     }))
                     .when_some(latest_audit, |messages, audit| {
-                        let success = audit.status == AuditStatus::Committed;
                         messages.child(
                             div()
                                 .flex()
-                                .items_center()
-                                .gap_2()
+                                .flex_col()
+                                .gap_1()
                                 .px_3()
                                 .py_2()
-                                .rounded_md()
+                                .rounded_xl()
                                 .border_1()
                                 .border_color(rgb(BORDER))
                                 .bg(rgb(SURFACE))
                                 .child(
-                                    Icon::new(IconName::File)
-                                        .size(px(15.0))
-                                        .text_color(rgb(INK_MUTED)),
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(
+                                            Icon::new(IdeallIcon::ShieldCheck)
+                                                .size(px(14.0))
+                                                .text_color(rgb(ACCENT)),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                                .text_color(rgb(INK))
+                                                .child("写操作审计"),
+                                        )
+                                        .child(div().flex_1())
+                                        .child(
+                                            div()
+                                                .px_2()
+                                                .py(px(1.0))
+                                                .rounded_full()
+                                                .bg(rgb(MESSAGE_TOOL))
+                                                .text_size(px(11.0))
+                                                .text_color(rgb(INK_MUTED))
+                                                .child(format!("已记录 {} 次", audit_count)),
+                                        ),
                                 )
                                 .child(
                                     div()
-                                        .flex_1()
                                         .overflow_hidden()
                                         .text_ellipsis()
                                         .whitespace_nowrap()
-                                        .text_xs()
+                                        .text_size(px(11.0))
                                         .text_color(rgb(INK_MUTED))
-                                        .child(audit.title),
-                                )
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(rgb(if success { ACCENT } else { INK_MUTED }))
-                                        .child(audit_status_label(audit.status)),
+                                        .child(format!(
+                                            "最近：{} · {}",
+                                            audit.title,
+                                            audit_status_label(audit.status)
+                                        )),
                                 ),
                         )
                     })
@@ -1230,16 +1368,16 @@ impl IdeallDesktop {
                     .p_3()
                     .border_t_1()
                     .border_color(rgb(BORDER))
-                    .bg(rgb(SURFACE))
+                    .bg(rgb(SURFACE_MUTED))
                     .child(
                         div()
                             .flex()
                             .flex_col()
                             .gap_2()
                             .p_2()
-                            .rounded_lg()
+                            .rounded_xl()
                             .border_1()
-                            .border_color(rgb(BORDER_STRONG))
+                            .border_color(rgb(BORDER))
                             .bg(rgb(SURFACE))
                             .child(
                                 Input::new(&self.agent_prompt_input)
@@ -1257,14 +1395,14 @@ impl IdeallDesktop {
                                             .overflow_hidden()
                                             .text_ellipsis()
                                             .whitespace_nowrap()
-                                            .text_xs()
+                                            .text_size(px(11.0))
                                             .text_color(rgb(INK_FAINT))
                                             .child(format!("{model} · Ctrl/⌘ Enter 发送")),
                                     )
                                     .child(
                                         Button::new("agent-panel-send")
-                                            .w(px(32.0))
-                                            .h(px(32.0))
+                                            .w(px(28.0))
+                                            .h(px(28.0))
                                             .p_0()
                                             .rounded_full()
                                             .icon(IconName::ArrowUp)
@@ -1358,7 +1496,12 @@ impl IdeallDesktop {
                                     .flex()
                                     .flex_col()
                                     .gap_1()
-                                    .child(div().text_xl().child("开始创作"))
+                                    .child(
+                                        div()
+                                            .text_xl()
+                                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                                            .child("开始创作"),
+                                    )
                                     .child(
                                         div()
                                             .text_sm()
@@ -1485,6 +1628,12 @@ impl IdeallDesktop {
                 IconName::Delete,
                 "回收站为空",
             ),
+            "收集箱" => (
+                "收集箱",
+                "捕获与未整理的内容先进这里，稍后再归类",
+                IconName::Inbox,
+                "还没有未整理的内容，捕获的书签会先进这里",
+            ),
             _ => (
                 "本地工作区",
                 "所有内容都保存在当前设备",
@@ -1556,6 +1705,35 @@ impl IdeallDesktop {
                                 )
                             }),
                     )
+                    .when(section == "搜索" && !items.is_empty(), |content| {
+                        let current = self.search_kind;
+                        content.child(div().flex().flex_wrap().gap_2().children(
+                            SEARCH_KIND_CHIPS.iter().map(|(key, kind, label)| {
+                                let active = current == *kind;
+                                let kind = *kind;
+                                div()
+                                    .id(SharedString::from(format!("search-kind-{key}")))
+                                    .h(px(26.0))
+                                    .px_3()
+                                    .rounded_full()
+                                    .flex()
+                                    .items_center()
+                                    .cursor_pointer()
+                                    .text_size(px(12.0))
+                                    .when(active, |chip| {
+                                        chip.bg(rgb(ACCENT_SOFT)).text_color(rgb(ACCENT))
+                                    })
+                                    .when(!active, |chip| {
+                                        chip.text_color(rgb(INK_MUTED))
+                                            .hover(|style| style.bg(rgb(HOVER)))
+                                    })
+                                    .child(*label)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.set_search_kind(kind, cx);
+                                    }))
+                            }),
+                        ))
+                    })
                     .when(items.is_empty(), |content| {
                         content.child(
                             div()
@@ -1570,12 +1748,16 @@ impl IdeallDesktop {
                         let id = item.id.clone();
                         let is_folder = item.kind == NodeKind::Folder;
                         let is_trash = section == "回收站";
+                        let snippet = item.snippet.clone();
+                        let show_snippet = section == "搜索" && !snippet.is_empty();
                         div()
                             .id(SharedString::from(format!("collection-item-{}", item.id)))
-                            .h(px(48.0))
+                            .when(!show_snippet, |row| row.h(px(48.0)))
+                            .when(show_snippet, |row| row.py_2())
                             .flex()
-                            .items_center()
-                            .gap_3()
+                            .flex_col()
+                            .justify_center()
+                            .gap_1()
                             .px_3()
                             .rounded_md()
                             .border_1()
@@ -1594,30 +1776,39 @@ impl IdeallDesktop {
                                 }
                             }))
                             .child(
-                                Icon::new(node_kind_icon(item.kind, false))
-                                    .size(px(17.0))
-                                    .text_color(rgb(INK_MUTED)),
-                            )
-                            .child(
                                 div()
-                                    .flex_1()
-                                    .overflow_hidden()
-                                    .text_ellipsis()
-                                    .whitespace_nowrap()
-                                    .text_sm()
-                                    .child(item.title),
+                                    .flex()
+                                    .items_center()
+                                    .gap_3()
+                                    .child(
+                                        Icon::new(node_kind_icon(item.kind, false))
+                                            .size(px(17.0))
+                                            .text_color(rgb(INK_MUTED)),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .overflow_hidden()
+                                            .text_ellipsis()
+                                            .whitespace_nowrap()
+                                            .text_sm()
+                                            .child(item.title),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(rgb(INK_FAINT))
+                                            .child(node_kind_label(item.kind)),
+                                    )
+                                    .child(
+                                        Icon::new(IconName::ChevronRight)
+                                            .size(px(14.0))
+                                            .text_color(rgb(INK_FAINT)),
+                                    ),
                             )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(rgb(INK_FAINT))
-                                    .child(node_kind_label(item.kind)),
-                            )
-                            .child(
-                                Icon::new(IconName::ChevronRight)
-                                    .size(px(14.0))
-                                    .text_color(rgb(INK_FAINT)),
-                            )
+                            .when(show_snippet, |row| {
+                                row.child(render_search_snippet(&snippet))
+                            })
                     })),
             )
             .into_any_element()
@@ -2107,11 +2298,6 @@ impl IdeallDesktop {
             .and_then(|parent_id| self.explorer.items.iter().find(|item| item.id == parent_id))
             .map(|item| item.title.clone())
             .unwrap_or_else(|| "我的资料库".to_owned());
-        let save_status = if self.editor.dirty {
-            "有未保存更改"
-        } else {
-            "已保存到本机"
-        };
 
         div()
             .flex_1()
@@ -2131,18 +2317,23 @@ impl IdeallDesktop {
                     .bg(rgb(SURFACE))
                     .child(
                         div()
-                            .text_xs()
+                            .text_size(px(11.0))
                             .text_color(rgb(INK_FAINT))
                             .child(parent_title),
                     )
-                    .child(div().text_xs().text_color(rgb(INK_FAINT)).child("/"))
+                    .child(
+                        div()
+                            .text_size(px(11.0))
+                            .text_color(rgb(INK_FAINT))
+                            .child("/"),
+                    )
                     .child(
                         div()
                             .flex_1()
                             .overflow_hidden()
                             .text_ellipsis()
                             .whitespace_nowrap()
-                            .text_xs()
+                            .text_size(px(11.0))
                             .text_color(rgb(INK_MUTED))
                             .child(current_title),
                     )
@@ -2178,27 +2369,69 @@ impl IdeallDesktop {
                     )
                     .when(is_note_document, |toolbar| {
                         toolbar.child(
-                            Button::new("toggle-note-preview")
-                                .icon(if show_note_preview {
-                                    IconName::EyeOff
-                                } else {
-                                    IconName::Eye
-                                })
-                                .label(if show_note_preview {
-                                    "编辑"
-                                } else {
-                                    "阅读"
-                                })
-                                .tooltip(if show_note_preview {
-                                    "切换到编辑视图"
-                                } else {
-                                    "切换到阅读视图"
-                                })
-                                .small()
-                                .ghost()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.toggle_note_preview(window, cx);
-                                })),
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(2.0))
+                                .p(px(2.0))
+                                .rounded_full()
+                                .bg(rgb(SURFACE_MUTED))
+                                .child(
+                                    div()
+                                        .id("note-mode-read")
+                                        .h(px(24.0))
+                                        .flex()
+                                        .items_center()
+                                        .px_3()
+                                        .rounded_full()
+                                        .text_xs()
+                                        .when(show_note_preview, |option| {
+                                            option
+                                                .border_1()
+                                                .border_color(rgb(BORDER))
+                                                .bg(rgb(SURFACE))
+                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                .text_color(rgb(INK))
+                                        })
+                                        .when(!show_note_preview, |option| {
+                                            option
+                                                .text_color(rgb(INK_MUTED))
+                                                .cursor_pointer()
+                                                .hover(|option| option.text_color(rgb(INK)))
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.toggle_note_preview(window, cx);
+                                                }))
+                                        })
+                                        .child("阅读"),
+                                )
+                                .child(
+                                    div()
+                                        .id("note-mode-edit")
+                                        .h(px(24.0))
+                                        .flex()
+                                        .items_center()
+                                        .px_3()
+                                        .rounded_full()
+                                        .text_xs()
+                                        .when(!show_note_preview, |option| {
+                                            option
+                                                .border_1()
+                                                .border_color(rgb(BORDER))
+                                                .bg(rgb(SURFACE))
+                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                .text_color(rgb(INK))
+                                        })
+                                        .when(show_note_preview, |option| {
+                                            option
+                                                .text_color(rgb(INK_MUTED))
+                                                .cursor_pointer()
+                                                .hover(|option| option.text_color(rgb(INK)))
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.toggle_note_preview(window, cx);
+                                                }))
+                                        })
+                                        .child("编辑"),
+                                ),
                         )
                     })
                     .when(
@@ -2351,28 +2584,14 @@ impl IdeallDesktop {
                                     .when(is_note_document, |input| {
                                         input
                                             .large()
-                                            .text_size(px(32.0))
+                                            .text_size(px(30.0))
                                             .font_weight(gpui::FontWeight::SEMIBOLD)
                                     })
                                     .appearance(false)
                                     .bordered(false)
                                     .focus_bordered(false)
                                     .disabled(self.show_trash),
-                            )
-                            .when(is_note_document, |title| {
-                                title.child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap_2()
-                                        .text_xs()
-                                        .text_color(rgb(INK_FAINT))
-                                        .child(div().w(px(6.0)).h(px(6.0)).rounded_full().bg(rgb(
-                                            if self.editor.dirty { 0xd39a27 } else { ACCENT },
-                                        )))
-                                        .child(save_status),
-                                )
-                            }),
+                            ),
                     ),
             )
             .when(self.note_editor_available(), |editor| {
@@ -2573,7 +2792,7 @@ impl IdeallDesktop {
                         body.child(self.render_note_mention_menu(mention_candidates, cx))
                     }),
             )
-            .when(!show_delegated_engine && !is_note_document, |editor| {
+            .when(!show_delegated_engine, |editor| {
                 editor.child(
                     div()
                         .h(px(30.0))
@@ -2586,7 +2805,7 @@ impl IdeallDesktop {
                         .border_color(rgb(BORDER))
                         .bg(rgb(SURFACE_MUTED))
                         .text_size(px(11.0))
-                        .text_color(rgb(INK_FAINT))
+                        .text_color(rgb(INK_MUTED))
                         .child(editor_mode_label)
                         .child(
                             div()
@@ -2679,7 +2898,7 @@ impl Render for IdeallDesktop {
         let show_collection_landing = !has_selection
             && matches!(
                 self.active_section.as_ref(),
-                "活动" | "浏览" | "搜索" | "回收站"
+                "活动" | "浏览" | "搜索" | "回收站" | "收集箱"
             );
         let active_browser_surface = browser_surface(
             self.editor.active_engine_id.as_deref(),
@@ -2848,6 +3067,54 @@ fn node_kind_label(kind: NodeKind) -> &'static str {
     }
 }
 
+const SEARCH_KIND_CHIPS: [(&str, Option<NodeKind>, &str); 6] = [
+    ("all", None, "全部"),
+    ("note", Some(NodeKind::Note), "笔记"),
+    ("bookmark", Some(NodeKind::Bookmark), "书签"),
+    ("file", Some(NodeKind::File), "文件"),
+    ("feed", Some(NodeKind::Feed), "关注源"),
+    ("thread", Some(NodeKind::Thread), "对话"),
+];
+
+/// 把 FTS 摘要按 « » 切分为 spans：标记内文本用 ACCENT 加粗，不显示标记原文。
+/// 正文中的换行等连续空白先折叠为单空格，保证结果行严格单行省略。
+fn render_search_snippet(snippet: &str) -> gpui::AnyElement {
+    let snippet = snippet.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut spans = Vec::new();
+    let mut rest = snippet.as_str();
+    while let Some(start) = rest.find('«') {
+        if !rest[..start].is_empty() {
+            spans.push((rest[..start].to_owned(), false));
+        }
+        rest = &rest[start + '«'.len_utf8()..];
+        let Some(end) = rest.find('»') else {
+            break;
+        };
+        spans.push((rest[..end].to_owned(), true));
+        rest = &rest[end + '»'.len_utf8()..];
+    }
+    if !rest.is_empty() {
+        spans.push((rest.to_owned(), false));
+    }
+    div()
+        .flex_1()
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .text_size(px(12.0))
+        .flex()
+        .children(spans.into_iter().map(|(text, highlighted)| {
+            if highlighted {
+                div()
+                    .text_color(rgb(ACCENT))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child(text)
+            } else {
+                div().text_color(rgb(INK_MUTED)).child(text)
+            }
+        }))
+        .into_any_element()
+}
+
 fn activity_action_content(icon: IconName, label: &'static str) -> gpui::Div {
     div()
         .size_full()
@@ -2879,7 +3146,7 @@ fn welcome_action(
         .items_center()
         .gap_3()
         .px_3()
-        .rounded_md()
+        .rounded_xl()
         .border_1()
         .border_color(rgb(BORDER))
         .bg(rgb(SURFACE))
@@ -2906,11 +3173,17 @@ fn settings_card(title: &'static str) -> gpui::Div {
         .flex()
         .flex_col()
         .gap_3()
-        .rounded_lg()
+        .rounded_xl()
         .border_1()
         .border_color(rgb(BORDER))
         .bg(rgb(SURFACE))
-        .child(div().text_sm().text_color(rgb(INK)).child(title))
+        .child(
+            div()
+                .text_sm()
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(rgb(INK))
+                .child(title),
+        )
 }
 
 fn page_heading(title: &'static str, subtitle: &'static str) -> gpui::Div {
@@ -2919,7 +3192,12 @@ fn page_heading(title: &'static str, subtitle: &'static str) -> gpui::Div {
         .flex_col()
         .gap_1()
         .pb_2()
-        .child(div().text_xl().child(title))
+        .child(
+            div()
+                .text_xl()
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .child(title),
+        )
         .child(div().text_sm().text_color(rgb(INK_MUTED)).child(subtitle))
 }
 

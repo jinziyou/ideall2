@@ -5,49 +5,51 @@
 //! never expose framework-specific types.
 
 pub mod color {
-    pub const CANVAS: u32 = 0xf4f1ea;
-    pub const SURFACE: u32 = 0xfffefa;
-    pub const SURFACE_MUTED: u32 = 0xf8f6f0;
-    pub const SURFACE_RAISED: u32 = 0xffffff;
-    pub const INK: u32 = 0x17211e;
-    pub const INK_MUTED: u32 = 0x65716c;
-    pub const INK_FAINT: u32 = 0x8b948f;
-    pub const BORDER: u32 = 0xdedfd8;
-    pub const BORDER_STRONG: u32 = 0xc9cec7;
-    pub const ACCENT: u32 = 0x176b55;
-    pub const ACCENT_SOFT: u32 = 0xdcece4;
-    pub const ACCENT_ON_RAIL: u32 = 0x8ed6b6;
-    pub const RAIL: u32 = 0x13211d;
-    pub const RAIL_MUTED: u32 = 0x9bb0a8;
-    pub const RAIL_ACTIVE: u32 = 0x28463c;
-    pub const RAIL_INK: u32 = 0xf3f6f2;
+    // 基础色板与桌面「清氧工作台」色板同源：移动端与桌面共享同一套
+    // 方向 A 浅色语义（含浅色底栏），仅保留移动端特有的状态色。
+    pub const CANVAS: u32 = desktop::CANVAS;
+    pub const SURFACE: u32 = desktop::SURFACE;
+    pub const SURFACE_MUTED: u32 = desktop::SURFACE_MUTED;
+    pub const SURFACE_RAISED: u32 = desktop::SURFACE_RAISED;
+    pub const INK: u32 = desktop::INK;
+    pub const INK_MUTED: u32 = desktop::INK_MUTED;
+    pub const INK_FAINT: u32 = desktop::INK_FAINT;
+    pub const BORDER: u32 = desktop::BORDER;
+    pub const BORDER_STRONG: u32 = desktop::BORDER_STRONG;
+    pub const ACCENT: u32 = desktop::ACCENT;
+    pub const ACCENT_SOFT: u32 = desktop::ACCENT_SOFT;
+    pub const ACCENT_ON_RAIL: u32 = desktop::ACCENT_ON_RAIL;
+    pub const RAIL: u32 = desktop::RAIL;
+    pub const RAIL_MUTED: u32 = desktop::RAIL_MUTED;
+    pub const RAIL_ACTIVE: u32 = desktop::RAIL_ACTIVE;
+    pub const RAIL_INK: u32 = desktop::RAIL_INK;
     pub const INFO: u32 = 0x315f9f;
     pub const INFO_SOFT: u32 = 0xe8eef8;
     pub const SUCCESS: u32 = ACCENT;
     pub const SUCCESS_SOFT: u32 = ACCENT_SOFT;
     pub const WARNING: u32 = 0x8a5a13;
-    pub const WARNING_SOFT: u32 = 0xfff2cf;
-    pub const DANGER: u32 = 0xa03b35;
+    pub const WARNING_SOFT: u32 = desktop::WARNING_SOFT;
+    pub const DANGER: u32 = desktop::DANGER;
     pub const DANGER_SOFT: u32 = 0xffe9e7;
-    pub const DANGER_BORDER: u32 = 0xe3c1b6;
+    pub const DANGER_BORDER: u32 = desktop::DANGER_BORDER;
     pub const DISABLED: u32 = 0xaab4c2;
-    pub const MESSAGE_TOOL: u32 = 0xf0f2ef;
+    pub const MESSAGE_TOOL: u32 = desktop::MESSAGE_TOOL;
 
-    /// Desktop-only light palette for the compact, AI-native workbench.
+    /// 共享浅色色板（桌面与移动端同源）；桌面附加 Token 在本模块内扩展。
     pub mod desktop {
-        pub const CANVAS: u32 = 0xf3f5f2;
+        pub const CANVAS: u32 = 0xf4f6f4;
         pub const SURFACE: u32 = 0xffffff;
         pub const SURFACE_MUTED: u32 = 0xf8faf8;
         pub const SURFACE_RAISED: u32 = 0xffffff;
-        pub const INK: u32 = 0x1c211e;
-        pub const INK_MUTED: u32 = 0x69716c;
-        pub const INK_FAINT: u32 = 0x929a95;
-        pub const BORDER: u32 = 0xe3e7e4;
+        pub const INK: u32 = 0x1b211e;
+        pub const INK_MUTED: u32 = 0x6a726d;
+        pub const INK_FAINT: u32 = 0x9aa29c;
+        pub const BORDER: u32 = 0xe4e8e5;
         pub const BORDER_STRONG: u32 = 0xcdd4cf;
         pub const ACCENT: u32 = 0x16825d;
         pub const ACCENT_HOVER: u32 = 0x126f50;
         pub const ACCENT_ACTIVE: u32 = 0x0e5d43;
-        pub const ACCENT_SOFT: u32 = 0xe4f3eb;
+        pub const ACCENT_SOFT: u32 = 0xe6f4ec;
         pub const ACCENT_ON_RAIL: u32 = ACCENT;
         pub const RAIL: u32 = 0xf7f9f6;
         pub const RAIL_MUTED: u32 = 0x6f7973;
@@ -61,7 +63,7 @@ pub mod color {
         pub const EDITOR: u32 = 0xffffff;
         pub const EDITOR_GUTTER: u32 = 0xf7f8f6;
         pub const HOVER: u32 = 0xeff2f0;
-        pub const SELECTION: u32 = 0xdaf0e4;
+        pub const SELECTION: u32 = 0xddf0e5;
         pub const STATUS_BAR: u32 = CANVAS;
     }
 }
@@ -140,6 +142,7 @@ pub fn section_status(section: &str) -> &'static str {
         "应用" => "原生 Agent 可直连模型，并通过授权 MCP 使用本地工具",
         "设置" => "同步凭据仅保存在系统安全存储中",
         "回收站" => "可恢复或永久删除",
+        "收集箱" => "捕获的内容先进收集箱，稍后再归类",
         _ => "所有内容保存在本机",
     }
 }

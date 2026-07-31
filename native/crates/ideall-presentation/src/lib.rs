@@ -5,35 +5,37 @@
 //! never expose framework-specific types.
 
 pub mod color {
-    pub const CANVAS: u32 = 0xf4f1ea;
-    pub const SURFACE: u32 = 0xfffefa;
-    pub const SURFACE_MUTED: u32 = 0xf8f6f0;
-    pub const SURFACE_RAISED: u32 = 0xffffff;
-    pub const INK: u32 = 0x17211e;
-    pub const INK_MUTED: u32 = 0x65716c;
-    pub const INK_FAINT: u32 = 0x8b948f;
-    pub const BORDER: u32 = 0xdedfd8;
-    pub const BORDER_STRONG: u32 = 0xc9cec7;
-    pub const ACCENT: u32 = 0x176b55;
-    pub const ACCENT_SOFT: u32 = 0xdcece4;
-    pub const ACCENT_ON_RAIL: u32 = 0x8ed6b6;
-    pub const RAIL: u32 = 0x13211d;
-    pub const RAIL_MUTED: u32 = 0x9bb0a8;
-    pub const RAIL_ACTIVE: u32 = 0x28463c;
-    pub const RAIL_INK: u32 = 0xf3f6f2;
+    // 基础色板与桌面「清氧工作台」色板同源：移动端与桌面共享同一套
+    // 方向 A 浅色语义（含浅色底栏），仅保留移动端特有的状态色。
+    pub const CANVAS: u32 = desktop::CANVAS;
+    pub const SURFACE: u32 = desktop::SURFACE;
+    pub const SURFACE_MUTED: u32 = desktop::SURFACE_MUTED;
+    pub const SURFACE_RAISED: u32 = desktop::SURFACE_RAISED;
+    pub const INK: u32 = desktop::INK;
+    pub const INK_MUTED: u32 = desktop::INK_MUTED;
+    pub const INK_FAINT: u32 = desktop::INK_FAINT;
+    pub const BORDER: u32 = desktop::BORDER;
+    pub const BORDER_STRONG: u32 = desktop::BORDER_STRONG;
+    pub const ACCENT: u32 = desktop::ACCENT;
+    pub const ACCENT_SOFT: u32 = desktop::ACCENT_SOFT;
+    pub const ACCENT_ON_RAIL: u32 = desktop::ACCENT_ON_RAIL;
+    pub const RAIL: u32 = desktop::RAIL;
+    pub const RAIL_MUTED: u32 = desktop::RAIL_MUTED;
+    pub const RAIL_ACTIVE: u32 = desktop::RAIL_ACTIVE;
+    pub const RAIL_INK: u32 = desktop::RAIL_INK;
     pub const INFO: u32 = 0x315f9f;
     pub const INFO_SOFT: u32 = 0xe8eef8;
     pub const SUCCESS: u32 = ACCENT;
     pub const SUCCESS_SOFT: u32 = ACCENT_SOFT;
     pub const WARNING: u32 = 0x8a5a13;
-    pub const WARNING_SOFT: u32 = 0xfff2cf;
-    pub const DANGER: u32 = 0xa03b35;
+    pub const WARNING_SOFT: u32 = desktop::WARNING_SOFT;
+    pub const DANGER: u32 = desktop::DANGER;
     pub const DANGER_SOFT: u32 = 0xffe9e7;
-    pub const DANGER_BORDER: u32 = 0xe3c1b6;
+    pub const DANGER_BORDER: u32 = desktop::DANGER_BORDER;
     pub const DISABLED: u32 = 0xaab4c2;
-    pub const MESSAGE_TOOL: u32 = 0xf0f2ef;
+    pub const MESSAGE_TOOL: u32 = desktop::MESSAGE_TOOL;
 
-    /// Desktop-only light palette for the compact, AI-native workbench.
+    /// 共享浅色色板（桌面与移动端同源）；桌面附加 Token 在本模块内扩展。
     pub mod desktop {
         pub const CANVAS: u32 = 0xf4f6f4;
         pub const SURFACE: u32 = 0xffffff;

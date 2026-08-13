@@ -82,7 +82,7 @@ jobs:
         with:
           toolchain: 1.96.0
           components: clippy,rustfmt
-      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
         with:
           workspaces: ./native -> target
       - name: Format
@@ -121,7 +121,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.96.0
-      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
         with:
           workspaces: ./native -> target
       - name: Build and package native Linux preview
@@ -171,7 +171,7 @@ jobs:
         if: matrix.name == 'windows'
         with:
           dotnet-version: 8.0.x
-      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
         with:
           workspaces: ./native -> target
       - name: Install Windows packaging tools
@@ -254,7 +254,7 @@ jobs:
         with:
           toolchain: 1.96.0
           targets: aarch64-linux-android,x86_64-linux-android
-      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
         with:
           workspaces: ./native -> target
       - uses: ./.github/actions/setup-cargo-ndk
@@ -320,7 +320,7 @@ jobs:
         with:
           toolchain: 1.96.0
           targets: aarch64-apple-ios-sim
-      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
         with:
           workspaces: ./native -> target
       - uses: ./.github/actions/setup-xcodegen

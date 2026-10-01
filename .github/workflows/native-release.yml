@@ -257,7 +257,7 @@ jobs:
           if [[ ! -d "$NDK_HOME" ]]; then
             sdkmanager "ndk;$ANDROID_NDK_VERSION"
           fi
-      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           gradle-version: "8.9"
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable

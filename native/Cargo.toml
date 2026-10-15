@@ -37,7 +37,7 @@ directories = "6.0"
 getrandom = "0.3"
 futures = "0.3.32"
 hkdf = "0.13"
-keyring = "=4.1.5"
+keyring = "=4.2.0"
 minisign = "=0.9.1"
 pbkdf2 = "0.13"
 percent-encoding = "2.3"
@@ -50,7 +50,7 @@ sha2 = "0.11"
 tempfile = "3.27"
 thiserror = "2.0"
 url = "2.5"
-ureq = { version = "=3.3.0", features = ["json"] }
+ureq = { version = "=3.4.2", features = ["json"] }
 unicode-segmentation = "1.12"
 uuid = { version = "1.0", features = ["serde", "v4"] }
 x11rb = { version = "=0.13.2", features = ["randr"] }
